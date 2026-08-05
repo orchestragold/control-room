@@ -45,7 +45,7 @@ def create_app(config_class=Config):
     return app
 
 
-def _auto_init_db(app):
+def _auto_init_db(flask_app):
     """
     Create tables and seed defaults on first startup.
     db.create_all() is idempotent — safe to call on every boot.
@@ -57,7 +57,7 @@ def _auto_init_db(app):
 
     from .models.queue import AppSetting
     if AppSetting.query.get('mode') is None:
-        db.session.add(AppSetting(key_name='mode', value=app.config.get('APP_MODE', 'test')))
+        db.session.add(AppSetting(key_name='mode', value=flask_app.config.get('APP_MODE', 'test')))
     if AppSetting.query.get('version') is None:
         db.session.add(AppSetting(key_name='version', value='0.1.0'))
     db.session.commit()
