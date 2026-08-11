@@ -1,0 +1,400 @@
+{% extends 'base.html' %}
+{% block title %}Pitch Machine — Control Room{% endblock %}
+{% block content_class %} wide{% endblock %}
+
+{% block extra_styles %}
+<style>
+  /* ─── Board layout ─────────────────────────────────────────────────────────── */
+
+  .pm-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+  }
+
+  .pm-title { font-size: 18px; font-weight: 300; color: #bbb; }
+
+  .pm-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sync-age { font-size: 11px; color: #2e2e2e; }
+
+  button.btn-ghost {
+    background: none;
+    border: 1px solid #2a2a2a;
+    color: #444;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 2px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: border-color 0.1s, color 0.1s;
+  }
+  button.btn-ghost:hover { border-color: #444; color: #888; }
+  button.btn-ghost:disabled { opacity: 0.4; cursor: default; }
+
+  .sync-error {
+    font-size: 12px;
+    color: #f87171;
+    background: #1c0a0a;
+    border: 1px solid #3a1010;
+    border-radius: 3px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+  }
+
+  .board {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: calc(100dvh - 148px);
+    align-items: flex-start;
+    padding-bottom: 12px;
+  }
+
+  @media (max-width: 700px) {
+    .board { height: calc(100dvh - 196px); }
+    .pm-title { font-size: 16px; }
+  }
+
+  /* ─── Columns ──────────────────────────────────────────────────────────────── */
+
+  .column {
+    flex-shrink: 0;
+    width: 200px;
+    display: flex;
+    flex-direction: column;
+    background: #0c0c0c;
+    border: 1px solid #1c1c1c;
+    border-radius: 3px;
+    max-height: 100%;
+  }
+
+  .col-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 11px 7px;
+    border-bottom: 1px solid #1a1a1a;
+    flex-shrink: 0;
+  }
+
+  .col-title {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #444;
+  }
+
+  .col-count {
+    font-size: 10px;
+    color: #2e2e2e;
+    background: #161616;
+    padding: 1px 5px;
+    border-radius: 2px;
+    min-width: 18px;
+    text-align: center;
+  }
+
+  /* Column colour variations */
+  .col-active  .col-title { color: #4a8a6a; }
+  .col-warm    .col-title { color: #3d7a96; }
+  .col-confirmed .col-title { color: #3a7a4a; }
+  .col-dim     .col-title { color: #3a3a3a; }
+  .col-review  .col-title { color: #a16207; }
+  .col-review  { border-color: #231900; }
+  .col-review  .col-header { border-color: #231900; }
+
+  .col-cards {
+    flex: 1;
+    overflow-y: auto;
+    padding: 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: background 0.1s;
+  }
+
+  .col-cards.drag-over { background: #111; }
+
+  .empty-col {
+    font-size: 11px;
+    color: #1e1e1e;
+    text-align: center;
+    padding: 18px 8px;
+    letter-spacing: 0.06em;
+  }
+
+  .more-label {
+    font-size: 10px;
+    color: #2a2a2a;
+    text-align: center;
+    padding: 4px;
+    letter-spacing: 0.04em;
+  }
+
+  /* ─── Cards ────────────────────────────────────────────────────────────────── */
+
+  .card {
+    background: #111;
+    border: 1px solid #1e1e1e;
+    border-radius: 2px;
+    padding: 8px 9px;
+    cursor: grab;
+    user-select: none;
+    transition: border-color 0.1s, opacity 0.12s;
+  }
+  .card:hover { border-color: #2e2e2e; }
+  .card.dragging { opacity: 0.35; cursor: grabbing; }
+
+  .card-name {
+    font-size: 12px;
+    color: #aaa;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .card-date {
+    font-size: 10px;
+    color: #2e2e2e;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .col-review .card { background: #0e0b00; border-color: #1e1800; }
+  .col-review .card:hover { border-color: #2e2500; }
+  .col-review .card-name { color: #b45309; }
+
+  .col-confirmed .card-name { color: #4a9a5a; }
+
+  /* ─── Toast ────────────────────────────────────────────────────────────────── */
+
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #ccc;
+    font-size: 12px;
+    padding: 7px 16px;
+    border-radius: 3px;
+    z-index: 500;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast.error { border-color: #4a1010; color: #f87171; }
+
+  /* ─── Mobile note ──────────────────────────────────────────────────────────── */
+
+  .mobile-note {
+    display: none;
+    font-size: 12px;
+    color: #333;
+    margin-bottom: 12px;
+  }
+  @media (max-width: 700px) { .mobile-note { display: block; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pm-header">
+  <h1 class="pm-title">Pitch Machine</h1>
+  <div class="pm-meta">
+    {% if sync_age %}
+    <span class="sync-age" id="sync-age">Synced {{ sync_age }}</span>
+    {% endif %}
+    <button class="btn-ghost" id="sync-btn">Sync</button>
+  </div>
+</div>
+
+{% if sync_error %}
+<div class="sync-error">{{ sync_error }}</div>
+{% endif %}
+
+<p class="mobile-note">Drag-and-drop works best on a larger screen.</p>
+
+<div class="board" id="board">
+  {% for stage in stage_order %}
+  {% set cfg = stage_config(stage) %}
+  {% set cards = buckets.get(stage, []) %}
+  {% set is_drop_target = stage.value in allowed_targets %}
+
+  <div class="column {{ cfg.col_class }}" data-stage="{{ stage.value }}">
+    <div class="col-header">
+      <span class="col-title">{{ cfg.label }}</span>
+      <span class="col-count">{{ cards|length }}</span>
+    </div>
+    <div class="col-cards"
+         {% if is_drop_target %}data-droptarget="true"{% endif %}
+         data-stage="{{ stage.value }}">
+
+      {% if not cards %}
+        <div class="empty-col">—</div>
+      {% else %}
+        {% set display_cards = cards[:cap] if stage == PMStage.NEEDS_OUTREACH else cards %}
+        {% for company in display_cards %}
+        <div class="card"
+             draggable="true"
+             data-hubspot-id="{{ company.hubspot_id }}"
+             data-stage="{{ stage.value }}">
+          <div class="card-name">{{ company.name }}</div>
+          {% if company.reach_out_1 %}
+          <div class="card-date">{{ company.reach_out_1.strftime('%-m/%-d') }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+
+        {% if stage == PMStage.NEEDS_OUTREACH and cards|length > cap %}
+        <div class="more-label">+{{ cards|length - cap }} more</div>
+        {% endif %}
+      {% endif %}
+
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var draggingId   = null;
+  var draggingFrom = null;
+  var draggingEl   = null;
+  var toast        = document.getElementById('toast');
+  var toastTimer   = null;
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
+
+  function showToast(msg, isError) {
+    clearTimeout(toastTimer);
+    toast.textContent = msg;
+    toast.className = 'show' + (isError ? ' error' : '');
+    toastTimer = setTimeout(function () { toast.className = ''; }, 3000);
+  }
+
+  // ── Drag ───────────────────────────────────────────────────────────────────
+
+  document.querySelectorAll('.card').forEach(function (card) {
+    card.addEventListener('dragstart', function (e) {
+      draggingId   = card.dataset.hubspotId;
+      draggingFrom = card.dataset.stage;
+      draggingEl   = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', function () {
+      card.classList.remove('dragging');
+    });
+  });
+
+  // ── Drop zones (only columns in allowed_targets) ───────────────────────────
+
+  document.querySelectorAll('.col-cards[data-droptarget]').forEach(function (zone) {
+    zone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      zone.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', function (e) {
+      // Only remove if leaving the zone itself, not a child
+      if (!zone.contains(e.relatedTarget)) {
+        zone.classList.remove('drag-over');
+      }
+    });
+    zone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+
+      var toStage = zone.dataset.stage;
+      if (!draggingId || toStage === draggingFrom) return;
+
+      var el = draggingEl;
+
+      fetch('/projects/orchestra-gold/pitch-machine/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hubspot_id: draggingId, to_stage: toStage })
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          // Move card in DOM and update its data-stage
+          el.dataset.stage = toStage;
+          // Remove empty-col placeholder if present
+          var emptyEl = zone.querySelector('.empty-col');
+          if (emptyEl) emptyEl.remove();
+          // Prepend card to new column
+          zone.prepend(el);
+          // Update counts
+          refreshCounts();
+          showToast('Moved');
+        } else {
+          showToast(data.error || 'Move failed', true);
+        }
+      })
+      .catch(function () {
+        showToast('Network error — try again', true);
+      });
+
+      draggingId = draggingFrom = draggingEl = null;
+    });
+  });
+
+  function refreshCounts() {
+    document.querySelectorAll('.column').forEach(function (col) {
+      var stage   = col.dataset.stage;
+      var cards   = col.querySelectorAll('.card').length;
+      col.querySelector('.col-count').textContent = cards;
+    });
+  }
+
+  // ── Sync button ────────────────────────────────────────────────────────────
+
+  var syncBtn = document.getElementById('sync-btn');
+  var syncAge = document.getElementById('sync-age');
+
+  syncBtn.addEventListener('click', function () {
+    syncBtn.disabled = true;
+    syncBtn.textContent = 'Syncing…';
+
+    fetch('/projects/orchestra-gold/pitch-machine/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.ok) {
+        showToast('Synced ' + data.count + ' companies — reload to see changes');
+        if (syncAge) syncAge.textContent = 'Synced just now';
+      } else {
+        showToast(data.error || 'Sync failed', true);
+      }
+    })
+    .catch(function () {
+      showToast('Sync failed — check connection', true);
+    })
+    .finally(function () {
+      syncBtn.disabled = false;
+      syncBtn.textContent = 'Sync';
+    });
+  });
+
+})();
+</script>
+{% endblock %}

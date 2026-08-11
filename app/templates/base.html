@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Control Room{% endblock %}</title>
+  {% block extra_styles %}{% endblock %}
   <style>
     :root {
       --bg:        #000;
@@ -218,6 +219,11 @@
       max-width: 860px;
     }
 
+    main.content.wide {
+      max-width: none;
+      padding: 24px 28px;
+    }
+
     /* Mobile sidebar overlay */
     .sidebar-overlay {
       position: fixed;
@@ -343,8 +349,8 @@
           </button>
           <div id="nav-og">
             {% if current_user.has_project_access('pitch-machine') %}
-            <a href="{{ url_for('main.pitch_machine') }}"
-               class="nav-item{% if request.endpoint == 'main.pitch_machine' %} active{% endif %}">
+            <a href="{{ url_for('pitch_machine.board') }}"
+               class="nav-item{% if request.endpoint and request.endpoint.startswith('pitch_machine.') %} active{% endif %}">
               Pitch Machine
             </a>
             {% endif %}
@@ -391,7 +397,7 @@
         <a href="{{ url_for('main.dashboard') }}" class="mobile-wordmark">Control Room</a>
       </header>
 
-      <main class="content">
+      <main class="content{% block content_class %}{% endblock %}">
         {% block content %}{% endblock %}
       </main>
     </div>

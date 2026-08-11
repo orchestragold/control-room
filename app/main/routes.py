@@ -33,16 +33,6 @@ def dashboard():
     return render_template('main/dashboard.html', greeting=greeting, first_name=first_name)
 
 
-@main_bp.route('/projects/orchestra-gold/pitch-machine')
-@login_required
-def pitch_machine():
-    _require_project('pitch-machine')
-    return render_template('main/placeholder.html',
-        title='Pitch Machine',
-        description='Festival outreach pipeline — coming in Session C.',
-    )
-
-
 @main_bp.route('/projects/orchestra-gold/distribution')
 @login_required
 def distribution():

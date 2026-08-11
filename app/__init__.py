@@ -35,8 +35,10 @@ def create_app(config_class=Config):
 
     from .auth.routes import auth_bp
     from .main.routes import main_bp
+    from .pitch_machine.routes import pm_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
+    app.register_blueprint(pm_bp)
 
     with app.app_context():
         _auto_init_db(app)
