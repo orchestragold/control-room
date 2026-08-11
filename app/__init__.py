@@ -28,6 +28,11 @@ def create_app(config_class=Config):
         from .models.user import User
         return User.query.get(int(user_id))
 
+    @app.context_processor
+    def inject_globals():
+        from app.core.mode import get_mode
+        return {'mode': get_mode()}
+
     from .auth.routes import auth_bp
     from .main.routes import main_bp
     app.register_blueprint(auth_bp)

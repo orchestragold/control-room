@@ -14,13 +14,16 @@ class PlatformConfig:
 # Per-platform rate limit config.
 # These match each API's documented limits; tighten or loosen as needed.
 PLATFORM_CONFIGS: dict[str, PlatformConfig] = {
-    'hubspot':         PlatformConfig(calls_per_window=100,   window_seconds=10),
-    'meta':            PlatformConfig(calls_per_window=200,   window_seconds=3600),
+    'hubspot':         PlatformConfig(calls_per_window=100,    window_seconds=10),
+    'meta':            PlatformConfig(calls_per_window=200,    window_seconds=3600),
     'youtube':         PlatformConfig(calls_per_window=10_000, window_seconds=86400),
-    'mailerlite':      PlatformConfig(calls_per_window=120,   window_seconds=60),
-    'asana':           PlatformConfig(calls_per_window=150,   window_seconds=60),
-    'google_calendar': PlatformConfig(calls_per_window=500,   window_seconds=100),
-    'dropbox':         PlatformConfig(calls_per_window=300,   window_seconds=60),
+    'mailerlite':      PlatformConfig(calls_per_window=120,    window_seconds=60),
+    'asana':           PlatformConfig(calls_per_window=150,    window_seconds=60),
+    'google_calendar': PlatformConfig(calls_per_window=500,    window_seconds=100),
+    'dropbox':         PlatformConfig(calls_per_window=300,    window_seconds=60),
+    # Zoho Mail API — pitch sending. Daily send cap tracked separately in app_settings
+    # (key: zoho_sends_today, reset nightly by cron). API-call-level limit is permissive.
+    'zoho':            PlatformConfig(calls_per_window=60,     window_seconds=60),
 }
 
 

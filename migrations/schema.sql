@@ -116,6 +116,45 @@ CREATE TABLE IF NOT EXISTS api_rate_tracking (
     KEY idx_platform_window (platform, window_start)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Warm contact flags (HubSpot is at 10/10 custom property cap — no room for a new property).
+-- Populated during the one-time historical gig spreadsheet import (Session F).
+CREATE TABLE IF NOT EXISTS warm_contacts (
+    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    hubspot_contact_id  VARCHAR(100) NOT NULL,
+    tagged_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tagged_by           INT UNSIGNED,
+    UNIQUE KEY uq_hs_contact (hubspot_contact_id),
+    FOREIGN KEY (tagged_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Dropbox file cache for knowledge-sync (PITCH_MACHINE_RULES.md, research playbook, etc.)
+CREATE TABLE IF NOT EXISTS dropbox_sync (
+    id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    path      VARCHAR(500)  NOT NULL,
+    content   LONGTEXT,
+    synced_at DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_path (path)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Touch 1 pitch drafts awaiting Erich's explicit approval (Touch 2/3 go through api_task_queue)
+CREATE TABLE IF NOT EXISTS pitch_approvals (
+    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    hubspot_contact_id  VARCHAR(100) NOT NULL,
+    touch_number        TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    draft_subject       VARCHAR(500),
+    draft_body          TEXT         NOT NULL,
+    status              ENUM('pending','approved','rejected','sent') NOT NULL DEFAULT 'pending',
+    approved_by         INT UNSIGNED,
+    approved_at         DATETIME,
+    sent_at             DATETIME,
+    error_message       TEXT,
+    created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_pa_status (status),
+    KEY idx_pa_contact (hubspot_contact_id),
+    FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Outbound API task queue (processed by cron → flask process-queue)
 CREATE TABLE IF NOT EXISTS api_task_queue (
     id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

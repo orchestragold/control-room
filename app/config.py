@@ -32,6 +32,13 @@ class Config:
     APP_MODE = os.environ.get('APP_MODE', 'test')
     TEST_REDIRECT_EMAIL = os.environ.get('TEST_REDIRECT_EMAIL', 'orchestragold@gmail.com')
 
+    # Editor-role grant at first login (comma-separated emails)
+    EDITOR_EMAILS = [
+        e.strip().lower()
+        for e in os.environ.get('EDITOR_EMAILS', '').split(',')
+        if e.strip()
+    ]
+
     # Integration credentials (placeholders — values come from .env)
     HUBSPOT_API_KEY = os.environ.get('HUBSPOT_API_KEY')
     ASANA_ACCESS_TOKEN = os.environ.get('ASANA_ACCESS_TOKEN')
@@ -41,3 +48,10 @@ class Config:
     DROPBOX_APP_KEY = os.environ.get('DROPBOX_APP_KEY')
     DROPBOX_APP_SECRET = os.environ.get('DROPBOX_APP_SECRET')
     DROPBOX_REFRESH_TOKEN = os.environ.get('DROPBOX_REFRESH_TOKEN')
+
+    # Zoho Mail OAuth — email provider for pitch sending (not Gmail).
+    # Move these from the existing scheduled task's prompt into cPanel env vars.
+    ZOHO_CLIENT_ID = os.environ.get('ZOHO_CLIENT_ID')
+    ZOHO_CLIENT_SECRET = os.environ.get('ZOHO_CLIENT_SECRET')
+    ZOHO_REFRESH_TOKEN = os.environ.get('ZOHO_REFRESH_TOKEN')
+    ZOHO_FROM_EMAIL = os.environ.get('ZOHO_FROM_EMAIL')

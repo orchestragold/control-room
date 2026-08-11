@@ -53,11 +53,12 @@ def callback():
     )
 
     if user is None:
-        role = (
-            'super_admin'
-            if email in current_app.config.get('SUPER_ADMIN_EMAILS', [])
-            else 'member'
-        )
+        if email in current_app.config.get('SUPER_ADMIN_EMAILS', []):
+            role = 'super_admin'
+        elif email in current_app.config.get('EDITOR_EMAILS', []):
+            role = 'editor'
+        else:
+            role = 'member'
         user = User(
             email=email,
             name=userinfo.get('name'),
