@@ -47,6 +47,16 @@ def create_app(config_class=Config):
         _auto_init_db(app)
         print('Database initialised and default settings seeded.')
 
+    @app.cli.command('sync-hubspot')
+    def sync_hubspot_command():
+        """Pull all HubSpot companies into the local cache. Safe to re-run."""
+        from app.integrations.hubspot import sync_companies_to_cache, HubSpotError
+        try:
+            count = sync_companies_to_cache()
+            print(f'Synced {count} companies from HubSpot.')
+        except HubSpotError as e:
+            print(f'Error: {e}')
+
     return app
 
 

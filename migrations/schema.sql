@@ -116,6 +116,31 @@ CREATE TABLE IF NOT EXISTS api_rate_tracking (
     KEY idx_platform_window (platform, window_start)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Local cache of HubSpot Company objects (populated by `flask sync-hubspot` / nightly cron).
+-- The Pitch Machine kanban reads from here; never hits HubSpot on page load.
+-- reach_out_* are DATE values (planned send dates), not timestamps.
+CREATE TABLE IF NOT EXISTS hubspot_companies (
+    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    hubspot_id          VARCHAR(50)  NOT NULL,
+    name                VARCHAR(500) NOT NULL DEFAULT '',
+    description         LONGTEXT,
+    website             VARCHAR(500),
+    domain              VARCHAR(255),
+    hubspot_owner_id    VARCHAR(50),
+    reach_out_1         DATE,
+    reach_out_2_checkin DATE,
+    reach_out_2         DATE,
+    hs_lead_status      VARCHAR(100),
+    lifecyclestage      VARCHAR(100),
+    notes_last_contacted DATETIME,
+    hs_lastmodifieddate  DATETIME,
+    last_synced_at      DATETIME     NOT NULL,
+    UNIQUE KEY uq_hubspot_id (hubspot_id),
+    KEY idx_hsc_reach_out_1 (reach_out_1),
+    KEY idx_hsc_lead_status (hs_lead_status),
+    KEY idx_hsc_synced (last_synced_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Warm contact flags (HubSpot is at 10/10 custom property cap — no room for a new property).
 -- Populated during the one-time historical gig spreadsheet import (Session F).
 CREATE TABLE IF NOT EXISTS warm_contacts (
