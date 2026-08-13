@@ -170,9 +170,21 @@ def draft_queue():
         flash(str(e), 'error')
         return redirect(url_for('pitch_machine.board'))
 
-    needs_outreach = sorted(
-        [c for c in companies if get_stage(c) == PMStage.NEEDS_OUTREACH],
-        key=lambda c: c.name.lower(),
+    today = date.today()
+
+    # Decision #5 (Session 14): only show Festival companies with an upcoming
+    # reach_out_1 date set — not the full company list. Sorted nearest-first.
+    # Excludes: duplicates, already-pitched (SENT and beyond), and companies
+    # whose reach_out_1 is in the past (legacy calendar entries fall off here).
+    queued_upcoming = sorted(
+        [
+            c for c in companies
+            if not c.is_duplicate
+            and c.reach_out_1 is not None
+            and c.reach_out_1 >= today
+            and get_stage(c) == PMStage.QUEUED
+        ],
+        key=lambda c: c.reach_out_1,
     )[:_DRAFT_QUEUE_MAX_SHOWN]
 
     # Flag companies that already have a pending draft
@@ -190,7 +202,7 @@ def draft_queue():
 
     return render_template(
         'pitch_machine/draft_queue.html',
-        companies=needs_outreach,
+        companies=queued_upcoming,
         existing_pending=existing_pending,
         knowledge_ready=knowledge_ready,
         batch_limit=_GENERATE_BATCH_LIMIT,

@@ -133,7 +133,7 @@
 
 <form method="post" action="{{ url_for('pitch_machine.generate') }}" id="dq-form">
   <div class="dq-controls">
-    <span>{{ companies|length }} festivals need outreach</span>
+    <span>{{ companies|length }} festivals queued — sorted by send date</span>
     <button type="button" class="btn-link" id="select-all">select all</button>
     <button type="button" class="btn-link" id="select-none">none</button>
   </div>
@@ -150,9 +150,10 @@
              {% if has_draft %}disabled{% endif %}>
       <div class="company-info">
         <div class="company-name">{{ company.name }}</div>
-        {% if company.website %}
-        <div class="company-meta">{{ company.website }}</div>
-        {% endif %}
+        <div class="company-meta">
+          Send {{ company.reach_out_1.strftime('%-m/%-d') }}
+          {% if company.website %} · {{ company.website }}{% endif %}
+        </div>
         {% if company.description %}
         <div class="company-desc">{{ company.description[:160] }}{% if company.description|length > 160 %}…{% endif %}</div>
         {% endif %}
