@@ -59,6 +59,70 @@ def create_app(config_class=Config):
         except HubSpotError as e:
             print(f'Error: {e}')
 
+    @app.cli.command('process-queue')
+    def process_queue_command():
+        """Process pending zoho_mail send tasks. Run by cron every few minutes."""
+        from datetime import datetime
+        from app.integrations.zoho_mail import ZohoError, send_email
+        from app.models.pitch import PitchApproval
+        from app.models.queue import APITaskQueue
+
+        tasks = (
+            APITaskQueue.query
+            .filter_by(platform='zoho_mail', status='pending')
+            .filter(APITaskQueue.retry_count < APITaskQueue.max_retries)
+            .order_by(APITaskQueue.created_at)
+            .limit(10)
+            .all()
+        )
+
+        if not tasks:
+            print('No pending tasks.')
+            return
+
+        sent = 0
+        failed = 0
+
+        for task in tasks:
+            task.status     = 'processing'
+            task.started_at = datetime.utcnow()
+            db.session.commit()
+
+            payload = task.payload or {}
+            try:
+                send_email(
+                    to_address = payload['to_email_actual'],
+                    subject    = payload['subject'],
+                    body_html  = payload['body'],
+                    cc_address = payload.get('cc_email') or None,
+                )
+                task.status       = 'completed'
+                task.completed_at = datetime.utcnow()
+
+                approval = PitchApproval.query.get(payload.get('pitch_approval_id'))
+                if approval:
+                    approval.status  = 'sent'
+                    approval.sent_at = datetime.utcnow()
+
+                sent += 1
+                recipient = payload.get('to_email_actual', '?')
+                intended  = payload.get('to_email_intended', '')
+                redirect_note = f' (redirected from {intended})' if payload.get('was_redirected') else ''
+                print(f'  Sent → {recipient}{redirect_note}')
+
+            except Exception as e:
+                task.retry_count  += 1
+                task.error_message = str(e)
+                task.status = (
+                    'pending' if task.retry_count < task.max_retries else 'failed'
+                )
+                failed += 1
+                print(f'  Failed: {e}')
+
+            db.session.commit()
+
+        print(f'Done — {sent} sent, {failed} failed.')
+
     @app.cli.command('sync-knowledge')
     def sync_knowledge_command():
         """Pull Dropbox knowledge files into the local cache. Safe to re-run."""

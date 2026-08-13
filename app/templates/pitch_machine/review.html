@@ -141,22 +141,51 @@
   .body-field {
     margin-top: 12px;
     border-top: 1px solid #111;
-    padding-top: 12px;
+    padding-top: 0;
   }
-  .body-textarea {
+
+  /* Formatting toolbar */
+  .editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 0 6px;
+    border-bottom: 1px solid #111;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .tb-btn {
     background: none;
-    border: none;
+    border: 1px solid transparent;
+    color: #555;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 2px;
+    cursor: pointer;
+    line-height: 1.4;
+    transition: color 0.1s, border-color 0.1s;
+  }
+  .tb-btn:hover { color: #ccc; border-color: #333; }
+  .tb-sep { width: 1px; height: 16px; background: #222; margin: 0 4px; }
+
+  /* Editable body */
+  .body-editor {
     outline: none;
-    color: #999;
+    color: #ccc;
     font-size: 15px;
     font-family: inherit;
-    line-height: 1.7;
+    line-height: 1.8;
     width: 100%;
     min-height: 320px;
-    resize: vertical;
-    padding: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
-  .body-textarea:focus { color: #ccc; }
+  .body-editor:empty::before {
+    content: attr(data-placeholder);
+    color: #333;
+  }
+  .body-editor a { color: #5a9adf; text-decoration: underline; cursor: pointer; }
+  .body-editor a:hover { color: #7ab8ff; }
 
   /* Action buttons */
   .draft-actions {
@@ -279,9 +308,20 @@
     </div>
 
     <div class="body-field">
-      <textarea class="body-textarea"
-                name="body"
-                required>{{ draft.draft_body }}</textarea>
+      <div class="editor-toolbar">
+        <button type="button" class="tb-btn" data-cmd="bold" title="Bold">B</button>
+        <button type="button" class="tb-btn" data-cmd="italic" title="Italic"><em>i</em></button>
+        <div class="tb-sep"></div>
+        <button type="button" class="tb-btn" data-cmd="link" title="Insert link">⊞ link</button>
+        <button type="button" class="tb-btn" data-cmd="unlink" title="Remove link">✕ link</button>
+        <div class="tb-sep"></div>
+        <button type="button" class="tb-btn" data-cmd="removeFormat" title="Clear formatting">clear</button>
+      </div>
+      <div class="body-editor"
+           contenteditable="true"
+           data-placeholder="Pitch body…"
+           data-for="body-{{ draft.id }}">{{ draft.draft_body | safe }}</div>
+      <input type="hidden" name="body" id="body-{{ draft.id }}">
     </div>
 
     <div class="draft-actions">
@@ -305,22 +345,60 @@
   // ── Research brief toggles ────────────────────────────────────────────────────
   document.querySelectorAll('.brief-toggle').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      var targetId = btn.dataset.target;
-      var body = document.getElementById(targetId);
+      var body = document.getElementById(btn.dataset.target);
       var open = body.classList.toggle('open');
       btn.classList.toggle('open', open);
       btn.setAttribute('aria-expanded', open);
     });
   });
 
-  // ── Reject buttons (POST without a nested form) ───────────────────────────────
+  // ── Contenteditable editor ────────────────────────────────────────────────────
+
+  // Render plain-text bodies (newlines → <br>) on load
+  document.querySelectorAll('.body-editor').forEach(function (el) {
+    var text = el.innerHTML;
+    // If it looks like plain text (no HTML tags beyond maybe &amp; etc.), convert newlines
+    if (!/<[a-zA-Z]/.test(text)) {
+      el.innerHTML = text
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/\n/g, '<br>');
+    }
+  });
+
+  // Toolbar buttons
+  document.querySelectorAll('.tb-btn').forEach(function (btn) {
+    btn.addEventListener('mousedown', function (e) {
+      e.preventDefault(); // keep focus in editor
+      var cmd = btn.dataset.cmd;
+      if (cmd === 'link') {
+        var url = prompt('URL (include https://):');
+        if (url) document.execCommand('createLink', false, url);
+      } else if (cmd === 'unlink') {
+        document.execCommand('unlink', false, null);
+      } else {
+        document.execCommand(cmd, false, null);
+      }
+    });
+  });
+
+  // Sync contenteditable → hidden input before each form submit
+  document.querySelectorAll('.compose-form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+      form.querySelectorAll('.body-editor').forEach(function (editor) {
+        var hiddenId = editor.dataset.for;
+        var hidden   = document.getElementById(hiddenId);
+        if (hidden) hidden.value = editor.innerHTML;
+      });
+    });
+  });
+
+  // ── Reject buttons ────────────────────────────────────────────────────────────
   document.querySelectorAll('.btn-reject').forEach(function (btn) {
     btn.addEventListener('click', function () {
       if (!confirm('Reject this draft?')) return;
-      var url = btn.dataset.rejectUrl;
       var f = document.createElement('form');
       f.method = 'post';
-      f.action = url;
+      f.action = btn.dataset.rejectUrl;
       document.body.appendChild(f);
       f.submit();
     });
