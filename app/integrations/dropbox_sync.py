@@ -24,8 +24,8 @@ from app.extensions import db
 # Canonical Dropbox paths for the Pitch Machine knowledge base.
 # The .docx is the curated real-pitch archive ("when Sabbath went to Mali…").
 KNOWLEDGE_PATHS = [
-    '/CoWork/Festival Outreach/PITCH_MACHINE_RULES.md',
-    '/CoWork/Festival Outreach/2026-07 psych rock pitches - when sabbath went to Mali for four minutes.docx',
+    '/Orchestra GOLD ∴/CoWork/Festival Outreach/PITCH_MACHINE_RULES.md',
+    '/Orchestra GOLD ∴/CoWork/Festival Outreach/2026-07 psych rock pitches - when sabbath went to Mali for four minutes.docx',
 ]
 
 _TOKEN_URL   = 'https://api.dropbox.com/oauth2/token'
