@@ -30,6 +30,7 @@ KNOWLEDGE_PATHS = [
 
 _TOKEN_URL   = 'https://api.dropbox.com/oauth2/token'
 _DOWNLOAD_URL = 'https://content.dropboxapi.com/2/files/download'
+_UPLOAD_URL   = 'https://content.dropboxapi.com/2/files/upload'
 
 
 class DropboxError(Exception):
@@ -81,6 +82,59 @@ def _extract_text(path: str, raw: bytes) -> str:
         except Exception as e:
             raise DropboxError(f'Could not parse .docx at {path!r}: {e}')
     return raw.decode('utf-8', errors='replace')
+
+
+def upload_file(path: str, content: str) -> None:
+    """
+    Create or overwrite a text file in the Dropbox App folder.
+    Used for queue CSV write-back.
+    """
+    access_token = _get_access_token()
+    resp = requests.post(
+        _UPLOAD_URL,
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'Dropbox-API-Arg': json.dumps({
+                'path': path,
+                'mode': 'overwrite',
+                'autorename': False,
+                'mute': True,
+            }),
+            'Content-Type': 'application/octet-stream',
+        },
+        data=content.encode('utf-8'),
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+
+def download_file_direct(path: str) -> Optional[str]:
+    """
+    Download a file from Dropbox and return its text content without DB caching.
+    Returns None if the file doesn't exist (409 path/not_found).
+    Use for the queue CSV which changes frequently and shouldn't be stalely cached.
+    """
+    try:
+        access_token = _get_access_token()
+        raw = _download_file(path, access_token)
+        return _extract_text(path, raw)
+    except Exception as e:
+        if '409' in str(e) or 'not_found' in str(e).lower():
+            return None
+        raise DropboxError(f'Failed to download {path!r}: {e}')
+
+
+def get_or_create_queue_csv() -> str:
+    """
+    Download the pitch queue CSV from Dropbox, creating an empty one if it doesn't exist.
+    Returns the CSV content as a string.
+    """
+    from app.integrations.pitch_queue import QUEUE_PATH, empty_queue_csv
+    content = download_file_direct(QUEUE_PATH)
+    if content is None:
+        content = empty_queue_csv()
+        upload_file(QUEUE_PATH, content)
+    return content
 
 
 def sync_knowledge_to_cache(paths: Optional[list[str]] = None) -> dict[str, int]:

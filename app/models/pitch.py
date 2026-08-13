@@ -13,8 +13,9 @@ class PitchApproval(db.Model):
     __tablename__ = 'pitch_approvals'
 
     id                 = db.Column(db.Integer, primary_key=True)
-    hubspot_contact_id = db.Column(db.String(100), nullable=False)  # HubSpot company ID
+    hubspot_contact_id = db.Column(db.String(100), nullable=False)  # HubSpot company ID; empty for non-HubSpot queue items
     company_name       = db.Column(db.String(500))
+    pitch_type         = db.Column(db.String(50), nullable=False, default='Festival')  # Festival | WAA | Show Invite | PNW | Distribution
     touch_number       = db.Column(db.Integer, nullable=False, default=1)
     draft_subject      = db.Column(db.String(500))
     draft_body         = db.Column(db.Text, nullable=False)

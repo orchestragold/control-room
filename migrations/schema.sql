@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS pitch_approvals (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     hubspot_contact_id  VARCHAR(100) NOT NULL,
     company_name        VARCHAR(500),
+    pitch_type          VARCHAR(50)  NOT NULL DEFAULT 'Festival',
     touch_number        TINYINT UNSIGNED NOT NULL DEFAULT 1,
     draft_subject       VARCHAR(500),
     draft_body          TEXT         NOT NULL,
@@ -206,6 +207,11 @@ CREATE TABLE IF NOT EXISTS api_task_queue (
     KEY idx_queue_platform (platform),
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Session E migration: pitch_type column on pitch_approvals ───────────────
+-- ALTER TABLE pitch_approvals
+--   ADD COLUMN IF NOT EXISTS pitch_type VARCHAR(50) NOT NULL DEFAULT 'Festival'
+--     AFTER company_name;
 
 -- ─── Session D migration: new columns on pitch_approvals ──────────────────────
 -- Run these on an existing database where pitch_approvals was created before Session D.

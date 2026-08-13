@@ -18,93 +18,99 @@
     font-size: 12px;
     padding: 10px 14px;
     border-radius: 3px;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
     line-height: 1.5;
   }
-  .notice-warn  { background: #1c1200; border: 1px solid #3a2800; color: #a16207; }
+  .notice-warn  { background: #1c1200; border: 1px solid #3a2800; color: #c8a050; }
   .notice-error { background: #1c0a0a; border: 1px solid #3a1010; color: #f87171; }
 
   .dq-controls {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: 14px;
+    margin-bottom: 10px;
     flex-wrap: wrap;
   }
   .dq-controls span { font-size: 13px; color: #aaa; }
-
   .btn-link {
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 13px;
-    cursor: pointer;
-    padding: 0;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    background: none; border: none; color: #888; font-size: 13px;
+    cursor: pointer; padding: 0; text-decoration: underline; text-underline-offset: 2px;
   }
   .btn-link:hover { color: #eee; }
 
-  .company-list {
-    border: 1px solid #1c1c1c;
+  .entry-list {
+    border: 1px solid #1e1e1e;
     border-radius: 3px;
     overflow: hidden;
     margin-bottom: 20px;
   }
 
-  .company-row {
+  .entry-row {
     display: grid;
-    grid-template-columns: 24px 1fr auto;
+    grid-template-columns: 22px 1fr auto;
     align-items: start;
-    gap: 12px;
+    gap: 14px;
     padding: 12px 14px;
-    border-bottom: 1px solid #1e1e1e;
+    border-bottom: 1px solid #1a1a1a;
     cursor: pointer;
   }
-  .company-row:last-child { border-bottom: none; }
-  .company-row:hover      { background: #111; }
-  .company-row.has-draft  { opacity: 0.4; cursor: default; }
+  .entry-row:last-child  { border-bottom: none; }
+  .entry-row:hover       { background: #0e0e0e; }
+  .entry-row.has-draft   { opacity: 0.4; cursor: default; }
 
-  .company-check {
-    margin-top: 2px;
+  .entry-check {
+    margin-top: 3px;
     accent-color: #3a7a4a;
-    width: 14px;
-    height: 14px;
+    width: 14px; height: 14px;
   }
 
-  .company-info { display: flex; flex-direction: column; gap: 4px; }
-  .company-name { font-size: 15px; color: #eee; line-height: 1.3; }
-  .company-meta { font-size: 12px; color: #888; }
-  .company-desc { font-size: 12px; color: #777; line-height: 1.5; }
-  .draft-badge  { font-size: 11px; color: #5aaa7a; background: #0a1a10; border: 1px solid #1a3020; border-radius: 2px; padding: 2px 7px; white-space: nowrap; margin-top: 2px; }
+  .entry-info { display: flex; flex-direction: column; gap: 5px; }
+  .entry-name { font-size: 15px; color: #eee; line-height: 1.3; }
 
-  .dq-footer {
+  .entry-meta {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 8px;
     flex-wrap: wrap;
   }
+  .entry-date   { font-size: 12px; color: #888; }
+  .entry-source { font-size: 11px; color: #555; }
+  .entry-notes  { font-size: 12px; color: #777; line-height: 1.4; }
 
+  /* Pitch type badge */
+  .type-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .type-festival    { background: #0a1a10; border: 1px solid #1a3020; color: #5aaa7a; }
+  .type-waa         { background: #0a0e1c; border: 1px solid #1a2050; color: #5a7aaa; }
+  .type-show-invite { background: #1a0e1a; border: 1px solid #3a1a40; color: #aa5aaa; }
+  .type-pnw         { background: #1a1000; border: 1px solid #402800; color: #c8900a; }
+  .type-other       { background: #141414; border: 1px solid #2a2a2a; color: #888; }
+
+  .draft-badge {
+    font-size: 11px; color: #5aaa7a; background: #0a1a10;
+    border: 1px solid #1a3020; border-radius: 2px; padding: 2px 7px; white-space: nowrap;
+  }
+
+  .dq-footer {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
   .btn-generate {
-    background: #1a2e1a;
-    border: 1px solid #2a4a2a;
-    color: #6aaa7a;
-    font-size: 13px;
-    padding: 8px 20px;
-    border-radius: 3px;
-    cursor: pointer;
-    letter-spacing: 0.03em;
+    background: #1a2e1a; border: 1px solid #2a4a2a; color: #6aaa7a;
+    font-size: 13px; padding: 8px 20px; border-radius: 3px;
+    cursor: pointer; letter-spacing: 0.03em;
     transition: background 0.1s, border-color 0.1s;
   }
   .btn-generate:hover:not(:disabled) { background: #223022; border-color: #3a5a3a; }
   .btn-generate:disabled { opacity: 0.4; cursor: default; }
-
   .selected-count { font-size: 13px; color: #aaa; }
   .limit-note     { font-size: 12px; color: #666; }
-
-  .spinner { display: none; }
-  .generating .btn-generate { opacity: 0.5; pointer-events: none; }
-  .generating .spinner      { display: inline; }
 </style>
 {% endblock %}
 
@@ -122,60 +128,72 @@
 
 {% if not knowledge_ready %}
 <div class="notice notice-error">
-  Knowledge base not synced. Run <code>flask sync-knowledge</code> before generating drafts.
+  Knowledge base not synced — run <code>flask sync-knowledge</code> before generating drafts.
 </div>
 {% endif %}
 
 <div class="notice notice-warn">
-  Generation is synchronous — expect 30–60 seconds for {{ batch_limit }} festivals.
-  The page will appear frozen; don't close it. Select up to {{ batch_limit }} at a time.
+  Generation is synchronous — expect 30–60 seconds for {{ batch_limit }} items. Page will appear frozen; don't close it.
 </div>
 
 <form method="post" action="{{ url_for('pitch_machine.generate') }}" id="dq-form">
   <div class="dq-controls">
-    <span>{{ companies|length }} festivals queued — sorted by send date</span>
+    <span>{{ entries|length }} items queued — sorted by send date</span>
     <button type="button" class="btn-link" id="select-all">select all</button>
     <button type="button" class="btn-link" id="select-none">none</button>
   </div>
 
-  <div class="company-list">
-    {% for company in companies %}
-    {% set has_draft = company.hubspot_id in existing_pending %}
-    <label class="company-row {% if has_draft %}has-draft{% endif %}"
+  <div class="entry-list">
+    {% for entry in entries %}
+    {% set has_draft = entry.hubspot_id in existing_pending or entry.name in existing_pending %}
+    <label class="entry-row {% if has_draft %}has-draft{% endif %}"
            {% if has_draft %}title="Pending draft already exists"{% endif %}>
       <input type="checkbox"
-             name="hubspot_id"
-             value="{{ company.hubspot_id }}"
-             class="company-check"
+             name="entry_id"
+             value="{{ entry.entry_id }}"
+             class="entry-check"
              {% if has_draft %}disabled{% endif %}>
-      <div class="company-info">
-        <div class="company-name">{{ company.name }}</div>
-        <div class="company-meta">
-          Send {{ company.reach_out_1.strftime('%-m/%-d') }}
-          {% if company.website %} · {{ company.website }}{% endif %}
+
+      <div class="entry-info">
+        <div class="entry-name">{{ entry.name }}</div>
+        <div class="entry-meta">
+          {% if entry.send_date %}
+          <span class="entry-date">Send {{ entry.send_date.strftime('%-m/%-d/%y') }}</span>
+          {% endif %}
+          {% if entry.deadline %}
+          <span class="entry-source">Festival {{ entry.deadline.strftime('%b %Y') }}</span>
+          {% endif %}
+          {% if entry.website %}
+          <span class="entry-source">· {{ entry.website }}</span>
+          {% endif %}
+          <span class="entry-source">{{ entry.source }}</span>
         </div>
-        {% if company.description %}
-        <div class="company-desc">{{ company.description[:160] }}{% if company.description|length > 160 %}…{% endif %}</div>
+        {% if entry.notes %}
+        <div class="entry-notes">{{ entry.notes[:160] }}{% if entry.notes|length > 160 %}…{% endif %}</div>
+        {% elif entry.description %}
+        <div class="entry-notes">{{ entry.description[:160] }}{% if entry.description|length > 160 %}…{% endif %}</div>
         {% endif %}
       </div>
-      {% if has_draft %}
-      <div class="draft-badge">draft pending</div>
-      {% endif %}
+
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+        {% set pt = entry.pitch_type %}
+        <span class="type-badge {% if pt == 'Festival' %}type-festival{% elif pt == 'WAA' %}type-waa{% elif pt == 'Show Invite' %}type-show-invite{% elif pt == 'PNW' %}type-pnw{% else %}type-other{% endif %}">
+          {{ pt }}
+        </span>
+        {% if has_draft %}<span class="draft-badge">draft pending</span>{% endif %}
+      </div>
     </label>
     {% else %}
-    <div style="padding: 24px; text-align: center; font-size: 12px; color: #2a2a2a;">
-      No festivals in "Needs outreach" — sync HubSpot or check the board.
+    <div style="padding:28px;text-align:center;font-size:13px;color:#444;">
+      No items in the queue. Add some via Cowork, or check that HubSpot companies have
+      upcoming <code>reach_out_1</code> dates set.
     </div>
     {% endfor %}
   </div>
 
   <div class="dq-footer">
-    <button type="submit"
-            class="btn-generate"
-            id="generate-btn"
-            disabled
-            {% if not knowledge_ready %}title="Sync knowledge first"{% endif %}>
-      Generate drafts <span class="spinner">…</span>
+    <button type="submit" class="btn-generate" id="generate-btn" disabled>
+      Generate drafts
     </button>
     <span class="selected-count" id="selected-count">0 selected</span>
     <span class="limit-note">max {{ batch_limit }} per batch</span>
@@ -184,41 +202,32 @@
 
 <script>
 (function () {
-  var form        = document.getElementById('dq-form');
-  var btn         = document.getElementById('generate-btn');
-  var countEl     = document.getElementById('selected-count');
-  var selectAll   = document.getElementById('select-all');
-  var selectNone  = document.getElementById('select-none');
-  var limit       = {{ batch_limit }};
-  var knowledgeOk = {{ 'true' if knowledge_ready else 'false' }};
+  var form       = document.getElementById('dq-form');
+  var btn        = document.getElementById('generate-btn');
+  var countEl    = document.getElementById('selected-count');
+  var selectAll  = document.getElementById('select-all');
+  var selectNone = document.getElementById('select-none');
+  var limit      = {{ batch_limit }};
+  var ok         = {{ 'true' if knowledge_ready else 'false' }};
 
-  function updateState() {
-    var checked = form.querySelectorAll('input[name="hubspot_id"]:checked').length;
-    countEl.textContent = checked + ' selected';
-    btn.disabled = !knowledgeOk || checked === 0 || checked > limit;
-    if (checked > limit) {
-      countEl.textContent = checked + ' selected (max ' + limit + ')';
-    }
+  function update() {
+    var n = form.querySelectorAll('input[name="entry_id"]:checked').length;
+    countEl.textContent = n + ' selected' + (n > limit ? ' (max ' + limit + ')' : '');
+    btn.disabled = !ok || n === 0 || n > limit;
   }
 
-  form.addEventListener('change', updateState);
-
+  form.addEventListener('change', update);
   selectAll.addEventListener('click', function () {
-    form.querySelectorAll('input[name="hubspot_id"]:not(:disabled)').forEach(function (cb) {
-      cb.checked = true;
-    });
-    updateState();
+    form.querySelectorAll('input[name="entry_id"]:not(:disabled)').forEach(function (cb) { cb.checked = true; });
+    update();
   });
   selectNone.addEventListener('click', function () {
-    form.querySelectorAll('input[name="hubspot_id"]').forEach(function (cb) {
-      cb.checked = false;
-    });
-    updateState();
+    form.querySelectorAll('input[name="entry_id"]').forEach(function (cb) { cb.checked = false; });
+    update();
   });
-
   form.addEventListener('submit', function () {
-    document.body.classList.add('generating');
     btn.textContent = 'Generating…';
+    btn.disabled = true;
   });
 })();
 </script>

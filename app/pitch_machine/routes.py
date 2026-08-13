@@ -1,5 +1,7 @@
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Optional
 
 from flask import (
     Blueprint,
@@ -38,11 +40,10 @@ pm_bp = Blueprint(
     url_prefix='/projects/orchestra-gold/pitch-machine',
 )
 
-_NEEDS_OUTREACH_CAP    = 15   # cards shown in "Needs outreach" before "+ N more"
-_DRAFT_QUEUE_MAX_SHOWN = 50   # companies shown in the draft-selection checklist
-_GENERATE_BATCH_LIMIT  = 5    # max companies per synchronous generation batch
-
-_DEFAULT_CC = 'booking@orchestragold.com'
+_DRAFT_QUEUE_MAX_SHOWN = 50
+_GENERATE_BATCH_LIMIT  = 5
+_NEEDS_OUTREACH_CAP    = 15
+_DEFAULT_CC            = 'booking@orchestragold.com'
 
 
 def _require_access():
@@ -50,7 +51,119 @@ def _require_access():
         abort(403)
 
 
-# ── Kanban board ────────────────────────────────────────────────────────────────
+# ── Unified queue entry (merges HubSpot + queue-sheet items) ────────────────────
+
+@dataclass
+class QueueEntry:
+    """Normalised view of one item in the unified draft queue."""
+    name:            str
+    pitch_type:      str
+    source:          str            # 'hubspot' | 'cowork' | 'spreadsheet'
+    send_date:       Optional[date]  # computed from scheduling algorithm
+    deadline:        Optional[date]  # festival date (queue sheet) or None (HubSpot items)
+    hubspot_id:      str            # empty for queue-sheet-only items
+    website:         Optional[str]
+    description:     Optional[str]
+    notes:           Optional[str]
+    has_pending_draft: bool = False
+
+    @property
+    def sort_key(self):
+        return self.send_date or date.max
+
+    @property
+    def entry_id(self):
+        """Stable identifier passed as a form value."""
+        if self.hubspot_id:
+            return f'hs:{self.hubspot_id}'
+        return f'qs:{self.name}'
+
+
+def _build_queue(companies: list) -> list[QueueEntry]:
+    """
+    Build the unified queue from HubSpot QUEUED companies + Dropbox queue sheet.
+    Sorted by computed/planned send date, nearest first.
+    """
+    from app.integrations.dropbox_sync import DropboxError, get_or_create_queue_csv
+    from app.integrations.pitch_queue import parse_queue
+    from app.pitch_machine.scheduling import (
+        compute_send_date,
+        get_buyer_festival_dates,
+        infer_is_european,
+    )
+
+    today = date.today()
+    entries: list[QueueEntry] = []
+
+    # ── Source 1: HubSpot QUEUED companies with upcoming reach_out_1 ────────────
+    # Decision #5 (Session 14): only companies with an actual upcoming send date.
+    for c in companies:
+        if (
+            c.is_duplicate
+            or c.reach_out_1 is None
+            or c.reach_out_1 < today
+            or get_stage(c) != PMStage.QUEUED
+        ):
+            continue
+        entries.append(QueueEntry(
+            name        = c.name,
+            pitch_type  = 'Festival',
+            source      = 'hubspot',
+            send_date   = c.reach_out_1,
+            deadline    = None,
+            hubspot_id  = c.hubspot_id,
+            website     = c.website,
+            description = c.description,
+            notes       = None,
+        ))
+
+    # ── Source 2: Dropbox queue sheet ────────────────────────────────────────────
+    try:
+        csv_content = get_or_create_queue_csv()
+        queue_items = parse_queue(csv_content)
+    except Exception:
+        queue_items = []
+
+    existing_hs_ids = {e.hubspot_id for e in entries if e.hubspot_id}
+
+    for item in queue_items:
+        if item.status != 'queued':
+            continue
+        if not item.deadline or item.deadline < today:
+            continue
+        # Skip if this item is already represented by a HubSpot entry
+        if item.hubspot_id and item.hubspot_id in existing_hs_ids:
+            continue
+
+        # Compute send date via algorithm
+        if item.deadline:
+            try:
+                # For queue-sheet items we don't have the HubSpot company object,
+                # so we skip buyer-blackout (can't look up owner).
+                is_eu = infer_is_european(website=None, domain=None)  # no domain from queue sheet
+                send_date = compute_send_date(item.deadline, is_european=is_eu, buyer_festival_dates=[])
+            except Exception:
+                send_date = item.deadline
+        else:
+            send_date = None
+
+        entries.append(QueueEntry(
+            name        = item.name,
+            pitch_type  = item.pitch_type,
+            source      = item.source,
+            send_date   = send_date,
+            deadline    = item.deadline,
+            hubspot_id  = item.hubspot_id or '',
+            website     = None,
+            description = None,
+            notes       = item.notes or None,
+        ))
+
+    entries.sort(key=lambda e: e.sort_key)
+    return entries[:_DRAFT_QUEUE_MAX_SHOWN]
+
+
+# ── Kanban board ─────────────────────────────────────────────────────────────────
 
 @pm_bp.route('', strict_slashes=False)
 @login_required
@@ -120,7 +233,7 @@ def move():
         return jsonify({'error': 'JSON required'}), 400
 
     data = request.get_json(silent=True) or {}
-    hubspot_id    = str(data.get('hubspot_id', '')).strip()
+    hubspot_id     = str(data.get('hubspot_id', '')).strip()
     to_stage_value = str(data.get('to_stage', '')).strip()
 
     if not hubspot_id or not to_stage_value:
@@ -157,7 +270,7 @@ def move():
         return jsonify({'error': str(e)}), 500
 
 
-# ── Draft queue (festival selection) ────────────────────────────────────────────
+# ── Unified draft queue ──────────────────────────────────────────────────────────
 
 @pm_bp.route('/draft-queue')
 @login_required
@@ -170,27 +283,15 @@ def draft_queue():
         flash(str(e), 'error')
         return redirect(url_for('pitch_machine.board'))
 
-    today = date.today()
+    entries = _build_queue(companies)
 
-    # Decision #5 (Session 14): only show Festival companies with an upcoming
-    # reach_out_1 date set — not the full company list. Sorted nearest-first.
-    # Excludes: duplicates, already-pitched (SENT and beyond), and companies
-    # whose reach_out_1 is in the past (legacy calendar entries fall off here).
-    queued_upcoming = sorted(
-        [
-            c for c in companies
-            if not c.is_duplicate
-            and c.reach_out_1 is not None
-            and c.reach_out_1 >= today
-            and get_stage(c) == PMStage.QUEUED
-        ],
-        key=lambda c: c.reach_out_1,
-    )[:_DRAFT_QUEUE_MAX_SHOWN]
-
-    # Flag companies that already have a pending draft
     existing_pending = {
         a.hubspot_contact_id
         for a in PitchApproval.query.filter_by(status='pending').all()
+    } | {
+        a.company_name
+        for a in PitchApproval.query.filter_by(status='pending').all()
+        if not a.hubspot_contact_id
     }
 
     from app.integrations.dropbox_sync import DropboxError, get_knowledge_content
@@ -202,34 +303,36 @@ def draft_queue():
 
     return render_template(
         'pitch_machine/draft_queue.html',
-        companies=queued_upcoming,
+        entries=entries,
         existing_pending=existing_pending,
         knowledge_ready=knowledge_ready,
         batch_limit=_GENERATE_BATCH_LIMIT,
     )
 
 
-# ── Generate drafts ─────────────────────────────────────────────────────────────
+# ── Generate drafts ──────────────────────────────────────────────────────────────
 
 @pm_bp.route('/generate', methods=['POST'])
 @login_required
 def generate():
     _require_access()
 
-    hubspot_ids = request.form.getlist('hubspot_id')
-    if not hubspot_ids:
-        flash('Select at least one festival.', 'error')
+    entry_ids = request.form.getlist('entry_id')
+    if not entry_ids:
+        flash('Select at least one item.', 'error')
         return redirect(url_for('pitch_machine.draft_queue'))
 
-    if len(hubspot_ids) > _GENERATE_BATCH_LIMIT:
+    if len(entry_ids) > _GENERATE_BATCH_LIMIT:
         flash(
-            f'Select up to {_GENERATE_BATCH_LIMIT} festivals per batch '
-            f'({len(hubspot_ids)} selected).',
+            f'Select up to {_GENERATE_BATCH_LIMIT} items per batch '
+            f'({len(entry_ids)} selected).',
             'error',
         )
         return redirect(url_for('pitch_machine.draft_queue'))
 
     from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
+    from app.integrations.dropbox_sync import get_or_create_queue_csv, DropboxError
+    from app.integrations.pitch_queue import parse_queue
 
     try:
         generator = DraftGenerator()
@@ -237,51 +340,103 @@ def generate():
         flash(str(e), 'error')
         return redirect(url_for('pitch_machine.draft_queue'))
 
+    # Load queue sheet items for lookup
+    try:
+        queue_items = {item.name: item for item in parse_queue(get_or_create_queue_csv())}
+    except Exception:
+        queue_items = {}
+
+    try:
+        companies = get_cached_companies()
+    except HubSpotError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('pitch_machine.draft_queue'))
+
+    company_map = {c.hubspot_id: c for c in companies}
+
     errors: list[str] = []
     created = 0
 
-    for hs_id in hubspot_ids:
-        company = HubSpotCompany.query.filter_by(hubspot_id=hs_id).first()
-        if company is None or company.is_duplicate:
-            continue
+    for entry_id in entry_ids:
+        if entry_id.startswith('hs:'):
+            # ── HubSpot company ──────────────────────────────────────────────────
+            hs_id   = entry_id[3:]
+            company = company_map.get(hs_id)
+            if company is None or company.is_duplicate:
+                continue
 
-        # Skip if a pending draft already exists for this company
-        existing = PitchApproval.query.filter_by(
-            hubspot_contact_id=hs_id, status='pending'
-        ).first()
-        if existing:
-            errors.append(f'{company.name}: pending draft already exists — skipped')
-            continue
+            existing = PitchApproval.query.filter_by(
+                hubspot_contact_id=hs_id, status='pending'
+            ).first()
+            if existing:
+                errors.append(f'{company.name}: pending draft already exists — skipped')
+                continue
 
-        try:
-            draft = generator.generate(
-                name=company.name,
-                website=company.website,
-                description=company.description,
-            )
-        except DraftGenerationError as e:
-            errors.append(f'{company.name}: {e}')
-            continue
+            try:
+                draft = generator.generate(
+                    name=company.name,
+                    website=company.website,
+                    description=company.description,
+                )
+            except DraftGenerationError as e:
+                errors.append(f'{company.name}: {e}')
+                continue
 
-        approval = PitchApproval(
-            hubspot_contact_id=hs_id,
-            company_name=company.name,
-            touch_number=1,
-            draft_subject=draft.subject,
-            draft_body=draft.body,
-            research_notes=draft.research_notes,
-            cc_email=_DEFAULT_CC,
-            status='pending',
-        )
-        db.session.add(approval)
-        created += 1
+            db.session.add(PitchApproval(
+                hubspot_contact_id = hs_id,
+                company_name       = company.name,
+                pitch_type         = 'Festival',
+                touch_number       = 1,
+                draft_subject      = draft.subject,
+                draft_body         = draft.body,
+                research_notes     = draft.research_notes,
+                cc_email           = _DEFAULT_CC,
+                status             = 'pending',
+            ))
+            created += 1
+
+        elif entry_id.startswith('qs:'):
+            # ── Queue-sheet item ─────────────────────────────────────────────────
+            item_name = entry_id[3:]
+            item      = queue_items.get(item_name)
+            if item is None:
+                errors.append(f'{item_name!r}: not found in queue sheet — skipped')
+                continue
+
+            existing = PitchApproval.query.filter_by(
+                company_name=item_name, status='pending'
+            ).first()
+            if existing:
+                errors.append(f'{item_name}: pending draft already exists — skipped')
+                continue
+
+            try:
+                draft = generator.generate(
+                    name=item_name,
+                    website=None,
+                    description=item.notes or None,
+                )
+            except DraftGenerationError as e:
+                errors.append(f'{item_name}: {e}')
+                continue
+
+            db.session.add(PitchApproval(
+                hubspot_contact_id = item.hubspot_id or '',
+                company_name       = item_name,
+                pitch_type         = item.pitch_type,
+                touch_number       = 1,
+                draft_subject      = draft.subject,
+                draft_body         = draft.body,
+                research_notes     = draft.research_notes,
+                cc_email           = _DEFAULT_CC,
+                status             = 'pending',
+            ))
+            created += 1
 
     db.session.commit()
 
-    if errors:
-        for err in errors:
-            flash(err, 'error')
-
+    for err in errors:
+        flash(err, 'error')
     if created:
         flash(
             f'{created} draft{"s" if created != 1 else ""} ready for review.',
@@ -291,7 +446,7 @@ def generate():
     return redirect(url_for('pitch_machine.review'))
 
 
-# ── Touch 1 review / approve ─────────────────────────────────────────────────────
+# ── Touch 1 review / approve ──────────────────────────────────────────────────────
 
 @pm_bp.route('/review')
 @login_required
@@ -327,6 +482,7 @@ def approve(pid: int):
     body     = request.form.get('body', '').strip()
     to_email = request.form.get('to_email', '').strip()
     cc_email = request.form.get('cc_email', '').strip()
+    send_date_str = request.form.get('send_date', '').strip()
 
     if not to_email:
         flash('Enter a recipient email before approving.', 'error')
@@ -334,6 +490,9 @@ def approve(pid: int):
     if not body:
         flash('Draft body cannot be empty.', 'error')
         return redirect(url_for('pitch_machine.review'))
+
+    # Parse the scheduled send date (if provided by the form)
+    send_date = _parse_form_date(send_date_str)
 
     actual_recipient, was_redirected = resolve_email_recipient(to_email)
     send_subject = f'[TEST → {to_email}] {subject}' if was_redirected else subject
@@ -347,23 +506,43 @@ def approve(pid: int):
     approval.approved_at   = datetime.utcnow()
 
     db.session.add(ApprovalLog(
-        approver_id=current_user.id,
-        action='approved',
-        entity_type='pitch_approval',
-        entity_id=str(pid),
-        details={
-            'company_name':    approval.company_name,
-            'to_email':        to_email,
+        approver_id = current_user.id,
+        action      = 'approved',
+        entity_type = 'pitch_approval',
+        entity_id   = str(pid),
+        details     = {
+            'company_name':     approval.company_name,
+            'pitch_type':       approval.pitch_type,
+            'to_email':         to_email,
             'actual_recipient': actual_recipient,
-            'was_redirected':  was_redirected,
-            'subject':         subject,
+            'was_redirected':   was_redirected,
+            'subject':          subject,
+            'send_date':        send_date.isoformat() if send_date else None,
         },
     ))
 
+    # ── Atomic action (decision #10) ─────────────────────────────────────────────
+    # 1. Remove from queue sheet
+    # 2. Write reach_out_1 to HubSpot (Festival only; non-Festival blocked)
+    hs_write_error = None
+
+    _remove_from_queue_sheet(approval.company_name)
+
+    if approval.pitch_type == 'Festival' and approval.hubspot_contact_id:
+        hs_write_error = _write_hubspot_reach_out_1(
+            approval.hubspot_contact_id,
+            send_date,
+        )
+    elif approval.pitch_type != 'Festival':
+        hs_write_error = (
+            f'HubSpot write blocked for {approval.pitch_type} — '
+            'free a custom property slot first (decision #7, Session 14).'
+        )
+
     db.session.add(APITaskQueue(
-        platform='zoho_mail',
-        task_type='send_pitch_touch1',
-        payload={
+        platform  = 'zoho_mail',
+        task_type = 'send_pitch_touch1',
+        payload   = {
             'pitch_approval_id': pid,
             'to_email_intended': to_email,
             'to_email_actual':   actual_recipient,
@@ -371,13 +550,16 @@ def approve(pid: int):
             'subject':           send_subject,
             'body':              body,
             'was_redirected':    was_redirected,
+            'send_date':         send_date.isoformat() if send_date else None,
         },
-        created_by=current_user.id,
+        created_by = current_user.id,
     ))
 
     db.session.commit()
 
-    if was_redirected:
+    if hs_write_error:
+        flash(f'Approved — but note: {hs_write_error}', 'error')
+    elif was_redirected:
         flash(
             f'Approved — queued to send to {actual_recipient} '
             f'(test mode; intended: {to_email}).',
@@ -401,11 +583,14 @@ def reject(pid: int):
 
     approval.status = 'rejected'
     db.session.add(ApprovalLog(
-        approver_id=current_user.id,
-        action='rejected',
-        entity_type='pitch_approval',
-        entity_id=str(pid),
-        details={'company_name': approval.company_name},
+        approver_id = current_user.id,
+        action      = 'rejected',
+        entity_type = 'pitch_approval',
+        entity_id   = str(pid),
+        details     = {
+            'company_name': approval.company_name,
+            'pitch_type':   approval.pitch_type,
+        },
     ))
     db.session.commit()
 
@@ -413,6 +598,57 @@ def reject(pid: int):
     return redirect(url_for('pitch_machine.review'))
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────────
+
 def _get_redirect_email_display() -> str:
     from app.core.mode import get_test_redirect_email
     return get_test_redirect_email()
+
+
+def _parse_form_date(value: str) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _remove_from_queue_sheet(company_name: str) -> None:
+    """Mark a queue item as 'pitched' and rewrite the CSV to Dropbox."""
+    from app.integrations.dropbox_sync import (
+        DropboxError,
+        get_or_create_queue_csv,
+        upload_file,
+    )
+    from app.integrations.pitch_queue import QUEUE_PATH, parse_queue, serialize_queue
+    try:
+        items = parse_queue(get_or_create_queue_csv())
+        changed = False
+        for item in items:
+            if item.name == company_name and item.status == 'queued':
+                item.status = 'pitched'
+                changed = True
+        if changed:
+            upload_file(QUEUE_PATH, serialize_queue(items))
+    except Exception:
+        pass  # queue sheet removal is best-effort; HubSpot write is the source of truth
+
+
+def _write_hubspot_reach_out_1(hubspot_id: str, send_date: Optional[date]) -> Optional[str]:
+    """
+    Write the computed send date into reach_out_1 on the HubSpot company record.
+    Returns an error string if the write fails, or None on success.
+    """
+    if not send_date:
+        return None
+    try:
+        client = HubSpotClient()
+        client.update_company(hubspot_id, {'reach_out_1': send_date.isoformat()})
+        company = HubSpotCompany.query.filter_by(hubspot_id=hubspot_id).first()
+        if company:
+            company.reach_out_1 = send_date
+            db.session.flush()
+        return None
+    except HubSpotError as e:
+        return f'HubSpot reach_out_1 write failed: {e}'
