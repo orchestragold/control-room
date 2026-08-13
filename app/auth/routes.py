@@ -43,7 +43,7 @@ def callback():
         + current_app.config.get('ALLOWED_EMAILS', [])
     )
     if email not in allowed:
-        flash('Access denied. Your Google account is not authorized for Control Room.')
+        flash('Access denied. Your Google account is not authorized for The Portal.')
         return redirect(url_for('main.index'))
 
     # Find existing user by Google sub first, then fall back to email

@@ -49,6 +49,9 @@ class Config:
     DROPBOX_APP_SECRET = os.environ.get('DROPBOX_APP_SECRET')
     DROPBOX_REFRESH_TOKEN = os.environ.get('DROPBOX_REFRESH_TOKEN')
 
+    # Anthropic (Claude API) — used for draft generation
+    ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
+
     # Zoho Mail OAuth — email provider for pitch sending (not Gmail).
     # Move these from the existing scheduled task's prompt into cPanel env vars.
     ZOHO_CLIENT_ID = os.environ.get('ZOHO_CLIENT_ID')

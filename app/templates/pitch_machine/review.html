@@ -1,0 +1,330 @@
+{% extends 'base.html' %}
+{% block title %}Review Drafts — The Portal{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .rv-header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .rv-title { font-size: 18px; font-weight: 300; color: #bbb; }
+  .rv-back  { font-size: 12px; color: #333; text-decoration: none; }
+  .rv-back:hover { color: #666; }
+
+  /* Mode badge */
+  .mode-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 2px;
+    margin-bottom: 18px;
+    display: inline-block;
+  }
+  .mode-badge.test { background: #1c1200; border: 1px solid #3a2800; color: #a16207; }
+  .mode-badge.live { background: #0a1a10; border: 1px solid #1a3020; color: #6aaa7a; }
+  .mode-note { font-size: 11px; color: #333; margin-left: 8px; }
+
+  .notice {
+    font-size: 12px;
+    padding: 10px 14px;
+    border-radius: 3px;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+  .notice-success { background: #0a1a10; border: 1px solid #1a3020; color: #6aaa7a; }
+  .notice-error   { background: #1c0a0a; border: 1px solid #3a1010; color: #f87171; }
+
+  .empty-review {
+    font-size: 13px;
+    color: #2a2a2a;
+    text-align: center;
+    padding: 60px 20px;
+    letter-spacing: 0.04em;
+  }
+  .empty-review a { color: #3a6a4a; text-decoration: none; }
+  .empty-review a:hover { color: #5aaa6a; }
+
+  /* Draft cards */
+  .draft-card {
+    background: #0a0a0a;
+    border: 1px solid #1c1c1c;
+    border-radius: 3px;
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+  .draft-card:last-child { margin-bottom: 0; }
+
+  .draft-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #141414;
+    flex-wrap: wrap;
+  }
+  .draft-company { font-size: 14px; color: #ccc; font-weight: 400; }
+  .draft-touch   { font-size: 10px; color: #2a2a2a; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  /* Research brief (collapsible) */
+  .brief-toggle {
+    width: 100%;
+    background: none;
+    border: none;
+    border-bottom: 1px solid #111;
+    padding: 8px 16px;
+    text-align: left;
+    font-size: 11px;
+    color: #2a2a2a;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brief-toggle:hover { color: #444; }
+  .brief-toggle .arrow { display: inline-block; transition: transform 0.15s; }
+  .brief-toggle.open .arrow { transform: rotate(90deg); }
+
+  .brief-body {
+    display: none;
+    padding: 12px 16px;
+    font-size: 12px;
+    color: #3a3a3a;
+    line-height: 1.65;
+    border-bottom: 1px solid #111;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .brief-body.open { display: block; }
+
+  /* Compose form */
+  .compose-form { padding: 14px 16px; }
+
+  .field-row {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #111;
+    padding-bottom: 8px;
+  }
+  .field-row:last-of-type { border-bottom: none; }
+
+  .field-label {
+    font-size: 11px;
+    color: #2a2a2a;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .field-input {
+    background: none;
+    border: none;
+    outline: none;
+    color: #888;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+    padding: 0;
+  }
+  .field-input:focus { color: #bbb; }
+  .field-input::placeholder { color: #2a2a2a; }
+
+  .body-field {
+    margin-top: 12px;
+    border-top: 1px solid #111;
+    padding-top: 12px;
+  }
+  .body-textarea {
+    background: none;
+    border: none;
+    outline: none;
+    color: #999;
+    font-size: 15px;
+    font-family: inherit;
+    line-height: 1.7;
+    width: 100%;
+    min-height: 320px;
+    resize: vertical;
+    padding: 0;
+  }
+  .body-textarea:focus { color: #ccc; }
+
+  /* Action buttons */
+  .draft-actions {
+    display: flex;
+    gap: 10px;
+    padding: 12px 16px;
+    border-top: 1px solid #111;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .btn-approve {
+    background: #1a2e1a;
+    border: 1px solid #2a4a2a;
+    color: #6aaa7a;
+    font-size: 12px;
+    padding: 6px 18px;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .btn-approve:hover { background: #223022; border-color: #3a5a3a; }
+
+  .btn-reject {
+    background: none;
+    border: 1px solid #2a2a2a;
+    color: #444;
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: border-color 0.1s, color 0.1s;
+  }
+  .btn-reject:hover { border-color: #4a1010; color: #f87171; }
+
+  .draft-more-link {
+    margin-left: auto;
+    font-size: 11px;
+    color: #2a2a2a;
+    text-decoration: none;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rv-header">
+  <h1 class="rv-title">Review Drafts</h1>
+  <a href="{{ url_for('pitch_machine.board') }}" class="rv-back">← Board</a>
+  <a href="{{ url_for('pitch_machine.draft_queue') }}" class="rv-back">+ Draft more</a>
+</div>
+
+<span class="mode-badge {{ 'test' if test_mode else 'live' }}">
+  {{ 'test mode' if test_mode else 'live mode' }}
+</span>
+{% if test_mode %}
+<span class="mode-note">Approving sends to {{ redirect_email }}</span>
+{% endif %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+  <div class="notice notice-{{ 'error' if cat == 'error' else 'success' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+{% if not drafts %}
+<div class="empty-review">
+  No drafts pending review.
+  <a href="{{ url_for('pitch_machine.draft_queue') }}">Draft some pitches →</a>
+</div>
+{% else %}
+
+{% for draft in drafts %}
+<div class="draft-card" id="draft-{{ draft.id }}">
+
+  <div class="draft-card-header">
+    <div>
+      <div class="draft-company">{{ draft.company_name or 'Unknown festival' }}</div>
+    </div>
+    <span class="draft-touch">Touch {{ draft.touch_number }}</span>
+  </div>
+
+  {% if draft.research_notes %}
+  <button class="brief-toggle" type="button"
+          data-target="brief-{{ draft.id }}"
+          aria-expanded="false">
+    <span class="arrow">▶</span> Research brief
+  </button>
+  <div class="brief-body" id="brief-{{ draft.id }}">{{ draft.research_notes }}</div>
+  {% endif %}
+
+  <form class="compose-form"
+        method="post"
+        action="{{ url_for('pitch_machine.approve', pid=draft.id) }}">
+
+    <div class="field-row">
+      <span class="field-label">To</span>
+      <input class="field-input"
+             type="email"
+             name="to_email"
+             value="{{ draft.to_email or '' }}"
+             placeholder="buyer@festival.com"
+             required>
+    </div>
+    <div class="field-row">
+      <span class="field-label">CC</span>
+      <input class="field-input"
+             type="text"
+             name="cc_email"
+             value="{{ draft.cc_email or 'booking@orchestragold.com' }}">
+    </div>
+    <div class="field-row">
+      <span class="field-label">Subject</span>
+      <input class="field-input"
+             type="text"
+             name="subject"
+             value="{{ draft.draft_subject or '' }}"
+             placeholder="Subject line">
+    </div>
+
+    <div class="body-field">
+      <textarea class="body-textarea"
+                name="body"
+                required>{{ draft.draft_body }}</textarea>
+    </div>
+
+    <div class="draft-actions">
+      <button type="submit" class="btn-approve">good to go</button>
+
+      <button type="button"
+              class="btn-reject"
+              data-reject-url="{{ url_for('pitch_machine.reject', pid=draft.id) }}">
+        reject
+      </button>
+    </div>
+
+  </form>
+</div>
+{% endfor %}
+
+{% endif %}
+
+<script>
+(function () {
+  // ── Research brief toggles ────────────────────────────────────────────────────
+  document.querySelectorAll('.brief-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var targetId = btn.dataset.target;
+      var body = document.getElementById(targetId);
+      var open = body.classList.toggle('open');
+      btn.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open);
+    });
+  });
+
+  // ── Reject buttons (POST without a nested form) ───────────────────────────────
+  document.querySelectorAll('.btn-reject').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (!confirm('Reject this draft?')) return;
+      var url = btn.dataset.rejectUrl;
+      var f = document.createElement('form');
+      f.method = 'post';
+      f.action = url;
+      document.body.appendChild(f);
+      f.submit();
+    });
+  });
+})();
+</script>
+{% endblock %}

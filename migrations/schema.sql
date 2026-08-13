@@ -1,4 +1,4 @@
--- Control Room — MySQL Schema
+-- The Portal — MySQL Schema
 -- Safe to re-run: all statements use IF NOT EXISTS.
 -- Run this after creating the database in cPanel.
 
@@ -162,12 +162,18 @@ CREATE TABLE IF NOT EXISTS dropbox_sync (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Touch 1 pitch drafts awaiting Erich's explicit approval (Touch 2/3 go through api_task_queue)
+-- hubspot_contact_id stores the HubSpot *company* ID — festivals are COMPANY objects.
+-- The column name is a legacy artifact; don't rename.
 CREATE TABLE IF NOT EXISTS pitch_approvals (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     hubspot_contact_id  VARCHAR(100) NOT NULL,
+    company_name        VARCHAR(500),
     touch_number        TINYINT UNSIGNED NOT NULL DEFAULT 1,
     draft_subject       VARCHAR(500),
     draft_body          TEXT         NOT NULL,
+    research_notes      MEDIUMTEXT,
+    to_email            VARCHAR(500),
+    cc_email            VARCHAR(500),
     status              ENUM('pending','approved','rejected','sent') NOT NULL DEFAULT 'pending',
     approved_by         INT UNSIGNED,
     approved_at         DATETIME,
@@ -200,3 +206,15 @@ CREATE TABLE IF NOT EXISTS api_task_queue (
     KEY idx_queue_platform (platform),
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Session D migration: new columns on pitch_approvals ──────────────────────
+-- Run these on an existing database where pitch_approvals was created before Session D.
+-- The CREATE TABLE above already includes these columns for fresh installs.
+-- MySQL 8.0.3+ supports IF NOT EXISTS on ADD COLUMN; on older versions, omit the clause
+-- (the statements are idempotent if columns already exist from a prior deploy).
+--
+-- ALTER TABLE pitch_approvals
+--   ADD COLUMN IF NOT EXISTS company_name   VARCHAR(500)  AFTER hubspot_contact_id,
+--   ADD COLUMN IF NOT EXISTS research_notes MEDIUMTEXT    AFTER draft_body,
+--   ADD COLUMN IF NOT EXISTS to_email       VARCHAR(500)  AFTER research_notes,
+--   ADD COLUMN IF NOT EXISTS cc_email       VARCHAR(500)  AFTER to_email;

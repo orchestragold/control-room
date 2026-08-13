@@ -1,12 +1,12 @@
-# Control Room — Build Session Roadmap
+# The Portal — Build Session Roadmap
 
-*Companion to Control_Room_Architecture_Spec.md. That document defines what Control Room is; this one partitions it into a sequence of build sessions, each sized to produce one working, usable increment rather than one giant build. Sessions are ordered by dependency, not strictly by priority — some later items (Distribution, Scheduling) matter just as much as early ones, they just need the foundation in place first.*
+*Companion to Control_Room_Architecture_Spec.md. That document defines what The Portal is; this one partitions it into a sequence of build sessions, each sized to produce one working, usable increment rather than one giant build. Sessions are ordered by dependency, not strictly by priority — some later items (Distribution, Scheduling) matter just as much as early ones, they just need the foundation in place first.*
 
 ## Before Session A: two things to lock first
 
 Everything below assumes these are settled, since they touch almost every session:
 
-1. **Login mechanism for Control Room itself.** The domain (`control.orchestragold.com`) and roles model are locked, but not *how* someone signs in. Given the team is small (Erich, Maeve, eventually band members) and Google Calendar is already a core dependency, **recommend Google Sign-In (OAuth)** as the default — no password to manage, no email-sending-for-magic-links infrastructure to build, and it's low-friction for band members later. Flag if you'd rather do email/password instead.
+1. **Login mechanism for The Portal itself.** The domain (`control.orchestragold.com`) and roles model are locked, but not *how* someone signs in. Given the team is small (Erich, Maeve, eventually band members) and Google Calendar is already a core dependency, **recommend Google Sign-In (OAuth)** as the default — no password to manage, no email-sending-for-magic-links infrastructure to build, and it's low-friction for band members later. Flag if you'd rather do email/password instead.
 2. **Confirm cPanel has a Cron Jobs tool on the GoDaddy plan.** Standard on most cPanel accounts but not yet explicitly checked in the walkthrough — needed from Session A onward for any background/scheduled task (inbox polling, follow-up timing, digest notifications). Quick check: cPanel → Files or Advanced section → "Cron Jobs."
 
 ---
@@ -15,7 +15,7 @@ Everything below assumes these are settled, since they touch almost every sessio
 
 - Set up the Python app on GoDaddy via cPanel's "Setup Python App," with Git-based deploy over SSH.
 - `.env`-based secrets scaffolding (HubSpot, Asana, Google Calendar, MailerLite, Dropbox keys — placeholders are fine until each integration lands).
-- Control Room's own database: schema for holds, notes, approval logs, user accounts/roles, notification preferences. This is the only genuinely new data store — everything else (HubSpot, Asana, Google Calendar) stays a system of record Control Room reads/writes into, not replaces.
+- The Portal's own database: schema for holds, notes, approval logs, user accounts/roles, notification preferences. This is the only genuinely new data store — everything else (HubSpot, Asana, Google Calendar) stays a system of record The Portal reads/writes into, not replaces.
 - Shared throttle/queue layer for outbound API calls (built once, configured per platform as each integration is added).
 - Google Sign-In auth wired up against `control.orchestragold.com`.
 - Test-mode/live-mode switch as a global setting (redirects outbound sends per integration — built here as infrastructure, used starting in Session D).
@@ -29,7 +29,7 @@ Everything below assumes these are settled, since they touch almost every sessio
 - Landing view: "what needs attention today" + upcoming — built against empty/mock data for now, wired to real sources as later sessions add them.
 - Mobile-responsive pass on the shell itself, since this is the one screen everyone sees every time.
 
-**Deliverable:** the actual navigable shell of Control Room, usable on a phone, with nothing behind most of the doors yet except Pitch Machine (next).
+**Deliverable:** the actual navigable shell of The Portal, usable on a phone, with nothing behind most of the doors yet except Pitch Machine (next).
 
 ## Session C — Pitch Machine, phase 1: visibility
 
@@ -91,7 +91,7 @@ Everything below assumes these are settled, since they touch almost every sessio
 
 ## Session J — Tasks (Asana sync)
 
-- Two-way sync: Asana tasks appear in Control Room, Control Room tasks push to Asana.
+- Two-way sync: Asana tasks appear in The Portal, The Portal tasks push to Asana.
 - Feeds the landing view's "what's due today" section with real data.
 
 ## Session K — Posting Tool, phase 1: foundation + Meta

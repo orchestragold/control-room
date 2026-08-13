@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Pitch Machine — Control Room{% endblock %}
+{% block title %}Pitch Machine — The Portal{% endblock %}
 {% block content_class %} wide{% endblock %}
 
 {% block extra_styles %}
@@ -26,7 +26,7 @@
 
   .sync-age { font-size: 11px; color: #2e2e2e; }
 
-  button.btn-ghost {
+  .btn-ghost {
     background: none;
     border: 1px solid #2a2a2a;
     color: #444;
@@ -36,9 +36,13 @@
     cursor: pointer;
     letter-spacing: 0.04em;
     transition: border-color 0.1s, color 0.1s;
+    text-decoration: none;
+    display: inline-block;
   }
-  button.btn-ghost:hover { border-color: #444; color: #888; }
-  button.btn-ghost:disabled { opacity: 0.4; cursor: default; }
+  .btn-ghost:hover { border-color: #444; color: #888; }
+  .btn-ghost:disabled { opacity: 0.4; cursor: default; }
+  .btn-ghost.btn-review { border-color: #2a4a2a; color: #4a8a5a; }
+  .btn-ghost.btn-review:hover { border-color: #3a6a3a; color: #6aaa7a; }
 
   .sync-error {
     font-size: 12px;
@@ -213,6 +217,12 @@
 <div class="pm-header">
   <h1 class="pm-title">Pitch Machine</h1>
   <div class="pm-meta">
+    {% if pending_count %}
+    <a href="{{ url_for('pitch_machine.review') }}" class="btn-ghost btn-review">
+      Review {{ pending_count }} draft{{ 's' if pending_count != 1 else '' }}
+    </a>
+    {% endif %}
+    <a href="{{ url_for('pitch_machine.draft_queue') }}" class="btn-ghost">Draft pitches →</a>
     {% if sync_age %}
     <span class="sync-age" id="sync-age">Synced {{ sync_age }}</span>
     {% endif %}

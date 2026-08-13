@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Control Room{% endblock %}</title>
+  <title>{% block title %}The Portal{% endblock %}</title>
   {% block extra_styles %}{% endblock %}
   <style>
     :root {
@@ -333,7 +333,7 @@
   <div class="shell">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-top">
-        <a href="{{ url_for('main.dashboard') }}" class="wordmark">Control Room</a>
+        <a href="{{ url_for('main.dashboard') }}" class="wordmark">The Portal</a>
         <button class="close-btn" id="close-btn" aria-label="Close menu">✕</button>
       </div>
 
@@ -394,7 +394,7 @@
     <div class="main-wrap">
       <header class="mobile-header">
         <button class="hamburger" id="hamburger" aria-label="Open menu">☰</button>
-        <a href="{{ url_for('main.dashboard') }}" class="mobile-wordmark">Control Room</a>
+        <a href="{{ url_for('main.dashboard') }}" class="mobile-wordmark">The Portal</a>
       </header>
 
       <main class="content{% block content_class %}{% endblock %}">

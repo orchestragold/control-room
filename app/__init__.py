@@ -59,6 +59,19 @@ def create_app(config_class=Config):
         except HubSpotError as e:
             print(f'Error: {e}')
 
+    @app.cli.command('sync-knowledge')
+    def sync_knowledge_command():
+        """Pull Dropbox knowledge files into the local cache. Safe to re-run."""
+        from app.integrations.dropbox_sync import sync_knowledge_to_cache, DropboxError
+        try:
+            results = sync_knowledge_to_cache()
+            for path, chars in results.items():
+                name = path.split('/')[-1]
+                print(f'  {name}: {chars:,} chars')
+            print(f'Knowledge sync complete ({len(results)} files).')
+        except DropboxError as e:
+            print(f'Error: {e}')
+
     return app
 
 
