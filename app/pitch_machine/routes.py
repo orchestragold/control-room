@@ -138,10 +138,17 @@ def _build_queue(companies: list) -> list[QueueEntry]:
         # Compute send date via algorithm
         if item.deadline:
             try:
-                # For queue-sheet items we don't have the HubSpot company object,
-                # so we skip buyer-blackout (can't look up owner).
-                is_eu = infer_is_european(website=None, domain=None)  # no domain from queue sheet
-                send_date = compute_send_date(item.deadline, is_european=is_eu, buyer_festival_dates=[])
+                if item.pitch_type == 'Festival':
+                    # Festival: send date = 8 months before the festival date
+                    send_date = compute_send_date(
+                        item.deadline,
+                        is_european=False,  # no domain available from queue sheet
+                        buyer_festival_dates=[],
+                    )
+                else:
+                    # WAA / Show Invite / PNW / Distribution:
+                    # deadline IS the pitch-by date — use it directly
+                    send_date = item.deadline
             except Exception:
                 send_date = item.deadline
         else:
