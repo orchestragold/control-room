@@ -58,3 +58,5 @@ class Config:
     ZOHO_CLIENT_SECRET = os.environ.get('ZOHO_CLIENT_SECRET')
     ZOHO_REFRESH_TOKEN = os.environ.get('ZOHO_REFRESH_TOKEN')
     ZOHO_FROM_EMAIL = os.environ.get('ZOHO_FROM_EMAIL')
+    ZOHO_FROM_NAME = os.environ.get('ZOHO_FROM_NAME', 'Erich Huffaker')
+    ZOHO_SIGNATURE_HTML = os.environ.get('ZOHO_SIGNATURE_HTML', '')

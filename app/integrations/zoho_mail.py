@@ -98,13 +98,17 @@ def send_email(
     """
     access_token = _get_access_token()
     account_id   = get_account_id(access_token)
-    from_addr    = from_address or current_app.config.get('ZOHO_FROM_EMAIL', '')
+    from_email   = from_address or current_app.config.get('ZOHO_FROM_EMAIL', '')
+    from_name    = current_app.config.get('ZOHO_FROM_NAME', '')
+    from_addr    = f'"{from_name}" <{from_email}>' if from_name else from_email
+
+    content = _build_html(body_html)
 
     payload: dict = {
         'fromAddress': from_addr,
         'toAddress':   to_address,
         'subject':     subject,
-        'content':     _ensure_html(body_html),
+        'content':     content,
         'mailFormat':  'html',
     }
     if cc_address:
@@ -123,28 +127,32 @@ def send_email(
     return resp.json()
 
 
-def _ensure_html(body: str) -> str:
+def _build_html(body: str) -> str:
     """
-    Prepare body text for HTML email sending.
-
-    Bodies may be:
-      - Plain text (from old drafts): escape special chars + convert \n to <br>
-      - Mixed (from new drafts): contain <a href> links inline with plain text newlines
-
-    In both cases, \n → <br> for correct line break rendering.
-    Existing <a href> tags are left intact; only bare & < > outside tags get escaped.
+    Wrap the pitch body in Tahoma 12pt, convert newlines to <br>,
+    and append the configured signature.
     """
     has_tags = bool(re.search(r'<[a-zA-Z]', body))
 
     if not has_tags:
-        # Pure plain text — escape everything then convert newlines
         escaped = (body
                    .replace('&', '&amp;')
                    .replace('<', '&lt;')
                    .replace('>', '&gt;'))
-        return escaped.replace('\n', '<br>\n')
+        body_html = escaped.replace('\n', '<br>\n')
+    else:
+        body_html = '<br>\n'.join(body.split('\n'))
 
-    # Mixed HTML+text — newlines that fall outside of tags become <br>
-    # Split on newlines and rejoin with <br>, which is safe since our
-    # <a href> tags are always inline (no multi-line tags in Claude output).
-    return '<br>\n'.join(body.split('\n'))
+    signature_html = current_app.config.get('ZOHO_SIGNATURE_HTML', '')
+    sig_block = (
+        f'<br><br><hr style="border:none;border-top:1px solid #ddd;margin:16px 0">'
+        f'{signature_html}'
+        if signature_html else ''
+    )
+
+    return (
+        '<div style="font-family:Tahoma,Geneva,sans-serif;font-size:12pt;line-height:1.6;">'
+        + body_html
+        + sig_block
+        + '</div>'
+    )
