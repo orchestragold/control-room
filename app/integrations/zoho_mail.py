@@ -156,7 +156,7 @@ def list_sent_messages(days_back: int = 90) -> list[dict]:
     resp = requests.get(
         f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
         headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
-        params={'folderId': sent_folder_id, 'limit': 200, 'sortcriteria': 'date', 'sortorder': 'desc'},
+        params={'folderId': sent_folder_id, 'limit': 200},
         timeout=30,
     )
     resp.raise_for_status()
@@ -165,7 +165,7 @@ def list_sent_messages(days_back: int = 90) -> list[dict]:
     for msg in resp.json().get('data', []):
         ts = msg.get('sentDateInGMT') or msg.get('receivedTime') or '0'
         if int(ts) < cutoff_ms:
-            break  # sorted desc — past the window
+            continue  # outside the window
 
         # Parse first email address from To: field ("Name <email>" or bare "email")
         to_raw = msg.get('toAddress', '')
