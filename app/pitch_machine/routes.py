@@ -133,6 +133,16 @@ def _build_queue(companies: list) -> list[QueueEntry]:
 
     existing_hs_ids = {e.hubspot_id for e in entries if e.hubspot_id}
 
+    # Build a set of company names that have already been sent or are approved/pending —
+    # used to filter the queue sheet regardless of whether the CSV write-back succeeded.
+    already_handled: set[str] = {
+        a.company_name.lower()
+        for a in PitchApproval.query.filter(
+            PitchApproval.status.in_(['sent', 'approved', 'pending'])
+        ).all()
+        if a.company_name
+    }
+
     for item in queue_items:
         if item.status != 'queued':
             continue
@@ -140,6 +150,9 @@ def _build_queue(companies: list) -> list[QueueEntry]:
             continue
         # Skip if this item is already represented by a HubSpot entry
         if item.hubspot_id and item.hubspot_id in existing_hs_ids:
+            continue
+        # Skip if a pitch_approval already exists for this company (sent/approved/pending)
+        if item.name.lower() in already_handled:
             continue
 
         # Compute send date via algorithm
