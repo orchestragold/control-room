@@ -145,8 +145,11 @@ def _build_html(body: str) -> str:
 
     signature_html = current_app.config.get('ZOHO_SIGNATURE_HTML', '')
     sig_block = (
-        f'<br><br><hr style="border:none;border-top:1px dashed #ccc;margin:16px 0">'
-        f'{signature_html}'
+        # Use a div instead of <hr> — Gmail treats <hr> as a signature delimiter
+        # and collapses everything below it behind the "..." button.
+        '<br><br>'
+        '<div style="border-top:1px dashed #ccc;margin:16px 0;line-height:0;font-size:0;">&nbsp;</div>'
+        f'<div style="font-size:small;">{signature_html}</div>'
         if signature_html else ''
     )
 
