@@ -145,13 +145,13 @@ def _build_html(body: str) -> str:
 
     signature_html = current_app.config.get('ZOHO_SIGNATURE_HTML', '')
     sig_block = (
-        f'<br><br><hr style="border:none;border-top:1px solid #ddd;margin:16px 0">'
+        f'<br><br><hr style="border:none;border-top:1px dashed #ccc;margin:16px 0">'
         f'{signature_html}'
         if signature_html else ''
     )
 
     return (
-        '<div style="font-family:Tahoma,Geneva,sans-serif;font-size:11pt;line-height:1.6;">'
+        '<div style="font-family:Tahoma,Geneva,sans-serif;line-height:1.6;">'
         + body_html
         + sig_block
         + '</div>'

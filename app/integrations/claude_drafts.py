@@ -263,23 +263,38 @@ def _parse_response(text: str) -> tuple[str, str, str]:
         r'^##\s*Research Brief\s*', '', brief_part, flags=re.IGNORECASE
     ).strip()
 
+    # Allow optional markdown bold around label (Claude sometimes outputs **Subject:**)
     subject_match = re.search(
-        r'^Subject:\s*(.+)$', draft_part, re.IGNORECASE | re.MULTILINE
+        r'^\*{0,2}Subject:\*{0,2}\s*(.+)$', draft_part, re.IGNORECASE | re.MULTILINE
     )
     subject = subject_match.group(1).strip() if subject_match else ''
 
     body_match = re.search(
-        r'^Body:\s*\n(.+)', draft_part, re.IGNORECASE | re.MULTILINE | re.DOTALL
+        r'^\*{0,2}Body:\*{0,2}\s*\n(.+)', draft_part, re.IGNORECASE | re.MULTILINE | re.DOTALL
     )
     if body_match:
         body = body_match.group(1).strip()
     elif subject_match:
         body = re.sub(
-            r'^Body:\s*', '',
+            r'^\*{0,2}Body:\*{0,2}\s*', '',
             draft_part[subject_match.end():].strip(),
             flags=re.IGNORECASE,
         ).strip()
     else:
         body = draft_part.strip()
+
+    # Strip any "Drafting notes" section Claude appends after the body, move to research panel
+    drafting_split = re.split(
+        r'\n[-—]{3,}\n+\*{0,2}Drafting notes?:\*{0,2}',
+        body,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
+    if len(drafting_split) == 2:
+        body = drafting_split[0].strip()
+        drafting_notes = drafting_split[1].strip()
+        if drafting_notes:
+            sep = '\n\n---\n\n' if research_notes else ''
+            research_notes = (research_notes + sep + '**Drafting notes:**\n' + drafting_notes).strip()
 
     return research_notes, subject, body
