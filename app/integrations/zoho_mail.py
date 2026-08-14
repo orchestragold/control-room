@@ -138,10 +138,25 @@ def list_sent_messages(days_back: int = 90) -> list[dict]:
     cutoff_ms    = int((datetime.utcnow() - timedelta(days=days_back)).timestamp() * 1000)
     email_pat    = re.compile(r'[\w._%+\-]+@[\w.\-]+\.[a-zA-Z]{2,}')
 
+    # Resolve the Sent folder ID — the API requires the numeric ID, not the name
+    folders_resp = requests.get(
+        f'https://mail.zoho.com/api/accounts/{account_id}/folders',
+        headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
+        timeout=15,
+    )
+    folders_resp.raise_for_status()
+    sent_folder_id = next(
+        (f['folderId'] for f in folders_resp.json().get('data', [])
+         if f.get('folderName', '').lower() == 'sent'),
+        None,
+    )
+    if not sent_folder_id:
+        raise ZohoError('Could not find Sent folder in Zoho account')
+
     resp = requests.get(
         f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
         headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
-        params={'mailbox': 'Sent', 'limit': 200, 'sortcriteria': 'date', 'sortorder': 'desc'},
+        params={'mailbox': sent_folder_id, 'limit': 200, 'sortcriteria': 'date', 'sortorder': 'desc'},
         timeout=30,
     )
     resp.raise_for_status()
