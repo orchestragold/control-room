@@ -5,6 +5,10 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-change-before-deploy')
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///dev.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,   # drop and reconnect stale MySQL connections
+        'pool_recycle': 280,     # recycle before MySQL's default 300s wait_timeout
+    }
 
     # Secure cookies — disable only in local development (set FLASK_ENV=development)
     _is_dev = os.environ.get('FLASK_ENV') == 'development'
