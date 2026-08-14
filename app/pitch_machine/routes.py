@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -399,6 +400,7 @@ def generate():
                 draft_subject      = draft.subject,
                 draft_body         = draft.body,
                 research_notes     = draft.research_notes,
+                to_email           = _extract_email(draft.research_notes),
                 cc_email           = _DEFAULT_CC,
                 status             = 'pending',
             ))
@@ -437,6 +439,7 @@ def generate():
                 draft_subject      = draft.subject,
                 draft_body         = draft.body,
                 research_notes     = draft.research_notes,
+                to_email           = _extract_email(item.notes, draft.research_notes),
                 cc_email           = _DEFAULT_CC,
                 status             = 'pending',
             ))
@@ -608,6 +611,23 @@ def reject(pid: int):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────
+
+def _extract_email(*sources: Optional[str]) -> str:
+    """
+    Search each text source in order and return the first email address found.
+    Used to pre-fill the 'To' field at draft-generation time.
+    Skips @orchestragold.com addresses (those are CC, not the recipient).
+    """
+    pattern = re.compile(r'\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b')
+    for text in sources:
+        if not text:
+            continue
+        for match in pattern.finditer(text):
+            addr = match.group(0).lower()
+            if 'orchestragold.com' not in addr:
+                return addr
+    return ''
+
 
 def _get_redirect_email_display() -> str:
     from app.core.mode import get_test_redirect_email
