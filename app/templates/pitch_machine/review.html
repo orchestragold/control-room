@@ -5,6 +5,7 @@
 {% block extra_styles %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Symbols+2&family=Noto+Sans+Egyptian+Hieroglyphs&display=swap" rel="stylesheet">
+<script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/index.js"></script>
 <style>
   /* Symbol-aware font stack used everywhere text may contain OG house style characters:
      ∴ ✱ ∞ ⊙ ✺ ☍ ☉ 𓂀 ⦿ — covers macOS (Apple Symbols), Windows (Segoe UI Symbol),
@@ -142,6 +143,37 @@
   }
   .tb-btn:hover { color: #ccc; border-color: #333; }
   .tb-sep { width: 1px; height: 16px; background: #1e1e1e; margin: 0 4px; }
+
+  /* Emoji picker */
+  .emoji-picker-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .emoji-panel {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 300;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .emoji-panel.open { display: block; }
+  emoji-picker {
+    --background: #111;
+    --border-color: #222;
+    --button-hover-background: #1e1e1e;
+    --category-emoji-padding: 6px;
+    --emoji-size: 22px;
+    --input-border-color: #333;
+    --input-font-color: #ccc;
+    --input-placeholder-color: #555;
+    --outline-color: #444;
+    --text-color: #aaa;
+    width: 320px;
+    height: 360px;
+  }
 
   .body-editor {
     flex: 1;
@@ -305,6 +337,13 @@
             <button type="button" class="tb-btn" data-cmd="unlink">✕ link</button>
             <div class="tb-sep"></div>
             <button type="button" class="tb-btn" data-cmd="removeFormat">clear</button>
+            <div class="tb-sep"></div>
+            <div class="emoji-picker-wrap">
+              <button type="button" class="tb-btn emoji-trigger" title="Emoji">☺</button>
+              <div class="emoji-panel">
+                <emoji-picker></emoji-picker>
+              </div>
+            </div>
           </div>
           <div class="body-editor"
                contenteditable="true"
@@ -355,8 +394,8 @@
     }
   });
 
-  // Toolbar
-  document.querySelectorAll('.tb-btn').forEach(function (btn) {
+  // Toolbar (non-emoji buttons)
+  document.querySelectorAll('.tb-btn:not(.emoji-trigger)').forEach(function (btn) {
     btn.addEventListener('mousedown', function (e) {
       e.preventDefault();
       var cmd = btn.dataset.cmd;
@@ -368,6 +407,44 @@
       } else {
         document.execCommand(cmd, false, null);
       }
+    });
+  });
+
+  // Emoji picker — one instance per draft card
+  document.querySelectorAll('.emoji-picker-wrap').forEach(function (wrap) {
+    var trigger = wrap.querySelector('.emoji-trigger');
+    var panel   = wrap.querySelector('.emoji-panel');
+    var picker  = wrap.querySelector('emoji-picker');
+
+    // Find the editor in the same compose column
+    var editor = wrap.closest('.compose-col').querySelector('.body-editor');
+    var savedRange = null;
+
+    trigger.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      // Save cursor position before picker opens (focus leaves editor)
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount) savedRange = sel.getRangeAt(0).cloneRange();
+      panel.classList.toggle('open');
+    });
+
+    picker.addEventListener('emoji-click', function (e) {
+      var emoji = e.detail.unicode;
+      panel.classList.remove('open');
+      // Restore cursor and insert emoji
+      editor.focus();
+      var sel = window.getSelection();
+      if (savedRange) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+      }
+      document.execCommand('insertText', false, emoji);
+      savedRange = null;
+    });
+
+    // Close picker when clicking outside
+    document.addEventListener('mousedown', function (e) {
+      if (!wrap.contains(e.target)) panel.classList.remove('open');
     });
   });
 

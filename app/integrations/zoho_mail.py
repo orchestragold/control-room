@@ -151,7 +151,7 @@ def _build_html(body: str) -> str:
     )
 
     return (
-        '<div style="font-family:Tahoma,Geneva,sans-serif;font-size:12pt;line-height:1.6;">'
+        '<div style="font-family:Tahoma,Geneva,sans-serif;font-size:11pt;line-height:1.6;">'
         + body_html
         + sig_block
         + '</div>'
