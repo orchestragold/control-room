@@ -3,7 +3,19 @@
 {% block content_class %} wide{% endblock %}
 
 {% block extra_styles %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Symbols+2&family=Noto+Sans+Egyptian+Hieroglyphs&display=swap" rel="stylesheet">
 <style>
+  /* Symbol-aware font stack used everywhere text may contain OG house style characters:
+     ∴ ✱ ∞ ⊙ ✺ ☍ ☉ 𓂀 ⦿ — covers macOS (Apple Symbols), Windows (Segoe UI Symbol),
+     and the web fallback (Noto Sans Symbols 2) for exotic code points like U+13080 */
+  :root {
+    --symbol-fonts: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+                    'Apple Symbols', 'Segoe UI Symbol',
+                    'Apple Color Emoji', 'Segoe UI Emoji',
+                    'Noto Sans Symbols 2', 'Noto Sans Egyptian Hieroglyphs',
+                    'Noto Color Emoji', sans-serif;
+  }
   .rv-header {
     display: flex;
     align-items: baseline;
@@ -107,7 +119,7 @@
   }
   .field-input {
     background: none; border: none; outline: none;
-    color: #ccc; font-size: 13px; font-family: inherit; width: 100%; padding: 0;
+    color: #ccc; font-size: 13px; font-family: var(--symbol-fonts); width: 100%; padding: 0;
   }
   .field-input:focus { color: #eee; }
   .field-input::placeholder { color: #333; }
@@ -136,9 +148,7 @@
     outline: none;
     color: #ccc;
     font-size: 15px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
-                 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
-                 'Noto Color Emoji', sans-serif;
+    font-family: var(--symbol-fonts);
     line-height: 1.85;
     padding: 16px 18px;
     min-height: 320px;
@@ -193,9 +203,7 @@
     white-space: pre-wrap;
     word-break: break-word;
     overflow-y: auto;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
-                 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
-                 'Noto Color Emoji', sans-serif;
+    font-family: var(--symbol-fonts);
   }
 
   .no-brief {
