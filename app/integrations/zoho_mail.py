@@ -149,10 +149,10 @@ def _build_html(body: str) -> str:
         # Gmail's native rendering size and matches the body.
         signature_html = re.sub(r'font-size\s*:[^;"\'>]+;?\s*', '', signature_html)
     sig_block = (
-        # Use a div instead of <hr> — Gmail treats <hr> as a signature delimiter
-        # and collapses everything below it behind the "..." button.
+        # No horizontal separator — any visible line (hr or div border-top) triggers
+        # Gmail's trimming heuristic and hides the signature behind "...".
+        # The signature's own ∴ symbol provides the visual break.
         '<br><br>'
-        '<div style="border-top:1px dashed #ccc;margin:16px 0;line-height:0;font-size:0;">&nbsp;</div>'
         + signature_html
         if signature_html else ''
     )
