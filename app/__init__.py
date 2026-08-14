@@ -105,6 +105,25 @@ def create_app(config_class=Config):
                     approval.status  = 'sent'
                     approval.sent_at = datetime.utcnow()
 
+                    # Write ATTEMPTED_TO_CONTACT back to HubSpot so the board moves the card
+                    if approval.hubspot_contact_id:
+                        try:
+                            from app.integrations.hubspot import HubSpotClient, HubSpotError
+                            from app.models.hubspot_cache import HubSpotCompany
+                            updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
+                            if approval.send_date:
+                                updates['reach_out_1'] = approval.send_date.isoformat()
+                            HubSpotClient().update_company(approval.hubspot_contact_id, updates)
+                            company = HubSpotCompany.query.filter_by(
+                                hubspot_id=approval.hubspot_contact_id
+                            ).first()
+                            if company:
+                                company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
+                                if approval.send_date and not company.reach_out_1:
+                                    company.reach_out_1 = approval.send_date
+                        except Exception as hs_e:
+                            print(f'  HubSpot write failed for {approval.company_name}: {hs_e}')
+
                 sent += 1
                 recipient = payload.get('to_email_actual', '?')
                 intended  = payload.get('to_email_intended', '')
@@ -123,6 +142,82 @@ def create_app(config_class=Config):
             db.session.commit()
 
         print(f'Done — {sent} sent, {failed} failed.')
+
+    @app.cli.command('scan-sent')
+    def scan_sent_command():
+        """
+        Scan Zoho Sent folder and reconcile against pitch_approvals.
+        Marks matched approvals as sent, writes ATTEMPTED_TO_CONTACT to HubSpot.
+        Run manually after sending pitches outside the portal, or to backfill.
+        """
+        from datetime import datetime
+        from app.integrations.zoho_mail import ZohoError, list_sent_messages
+        from app.integrations.hubspot import HubSpotClient, HubSpotError
+        from app.models.pitch import PitchApproval
+        from app.models.hubspot_cache import HubSpotCompany
+
+        try:
+            messages = list_sent_messages(days_back=90)
+        except ZohoError as e:
+            print(f'Error fetching sent messages: {e}')
+            return
+
+        print(f'Found {len(messages)} sent messages in last 90 days.')
+
+        matched   = 0
+        unmatched = []
+
+        for msg in messages:
+            to_email = msg['to_address']
+            if not to_email:
+                continue
+
+            approval = (
+                PitchApproval.query
+                .filter(
+                    db.func.lower(PitchApproval.to_email) == to_email,
+                    PitchApproval.status.in_(['pending', 'approved']),
+                )
+                .first()
+            )
+
+            if not approval:
+                unmatched.append(msg)
+                continue
+
+            approval.status  = 'sent'
+            approval.sent_at = msg['sent_at'] or datetime.utcnow()
+
+            if approval.hubspot_contact_id:
+                try:
+                    updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
+                    if approval.send_date:
+                        updates['reach_out_1'] = approval.send_date.isoformat()
+                    HubSpotClient().update_company(approval.hubspot_contact_id, updates)
+                    company = HubSpotCompany.query.filter_by(
+                        hubspot_id=approval.hubspot_contact_id
+                    ).first()
+                    if company:
+                        company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
+                        if approval.send_date and not company.reach_out_1:
+                            company.reach_out_1 = approval.send_date
+                except HubSpotError as e:
+                    print(f'  HubSpot write failed for {approval.company_name}: {e}')
+
+            db.session.commit()
+            matched += 1
+            print(f'  Matched: {approval.company_name} → {to_email}')
+
+        print(f'\n{matched} matched and updated.')
+
+        if unmatched:
+            print(f'\n{len(unmatched)} sent messages with no portal record '
+                  f'(pitched outside portal — drag manually on board):')
+            for msg in unmatched[:25]:
+                subj = msg["subject"][:60]
+                print(f'  → {msg["to_address"]}: {subj}')
+            if len(unmatched) > 25:
+                print(f'  ... and {len(unmatched) - 25} more')
 
     @app.cli.command('sync-knowledge')
     def sync_knowledge_command():

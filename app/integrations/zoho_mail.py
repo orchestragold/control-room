@@ -126,6 +126,53 @@ def send_email(
     return resp.json()
 
 
+def list_sent_messages(days_back: int = 90) -> list[dict]:
+    """
+    Return sent messages from the last `days_back` days via the Zoho Sent folder.
+    Each item: {'to_address': str, 'subject': str, 'sent_at': datetime|None, 'message_id': str}
+    """
+    from datetime import datetime, timedelta
+
+    access_token = _get_access_token()
+    account_id   = get_account_id(access_token)
+    cutoff_ms    = int((datetime.utcnow() - timedelta(days=days_back)).timestamp() * 1000)
+    email_pat    = re.compile(r'[\w._%+\-]+@[\w.\-]+\.[a-zA-Z]{2,}')
+
+    resp = requests.get(
+        f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
+        headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
+        params={'mailbox': 'Sent', 'limit': 200, 'sortcriteria': 'date', 'sortorder': 'desc'},
+        timeout=30,
+    )
+    resp.raise_for_status()
+
+    messages = []
+    for msg in resp.json().get('data', []):
+        ts = msg.get('sentDateInGMT') or msg.get('receivedTime') or '0'
+        if int(ts) < cutoff_ms:
+            break  # sorted desc — past the window
+
+        # Parse first email address from To: field ("Name <email>" or bare "email")
+        to_raw = msg.get('toAddress', '')
+        m = email_pat.search(to_raw)
+        to_email = m.group(0).lower() if m else to_raw.lower().strip()
+
+        sent_at = None
+        try:
+            sent_at = datetime.utcfromtimestamp(int(ts) / 1000)
+        except Exception:
+            pass
+
+        messages.append({
+            'to_address': to_email,
+            'subject':    msg.get('subject', ''),
+            'sent_at':    sent_at,
+            'message_id': str(msg.get('messageId', '')),
+        })
+
+    return messages
+
+
 def _build_html(body: str) -> str:
     """
     Wrap the pitch body in Tahoma 12pt, convert newlines to <br>,

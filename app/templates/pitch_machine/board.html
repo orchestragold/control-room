@@ -110,6 +110,8 @@
   }
 
   /* Column colour variations */
+  .col-scheduled .col-title { color: #9b7fd4; }
+  .col-scheduled .card { opacity: 0.85; cursor: default; }
   .col-active  .col-title { color: #5aaa7a; }
   .col-warm    .col-title { color: #4a9ab6; }
   .col-confirmed .col-title { color: #4a9a5a; }
@@ -258,8 +260,9 @@
       {% else %}
         {% set display_cards = cards[:cap] if stage == PMStage.NEEDS_OUTREACH else cards %}
         {% for company in display_cards %}
+        {% set can_drag = company.hubspot_id and stage != PMStage.SCHEDULED %}
         <div class="card"
-             draggable="true"
+             {% if can_drag %}draggable="true"{% endif %}
              data-hubspot-id="{{ company.hubspot_id }}"
              data-stage="{{ stage.value }}">
           <div class="card-name">{{ company.name }}</div>

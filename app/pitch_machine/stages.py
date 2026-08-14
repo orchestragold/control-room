@@ -26,6 +26,7 @@ from typing import Optional
 class PMStage(str, Enum):
     NEEDS_OUTREACH = 'needs-outreach'
     QUEUED         = 'queued'
+    SCHEDULED      = 'scheduled'   # approved in portal, send task pending — portal-internal only
     SENT           = 'sent'
     IN_NEGOTIATION = 'in-negotiation'
     CONFIRMED      = 'confirmed'
@@ -44,6 +45,7 @@ class StageConfig:
 _CONFIGS: dict[PMStage, StageConfig] = {
     PMStage.NEEDS_OUTREACH: StageConfig('Needs outreach',   None,                   'col-neutral'),
     PMStage.QUEUED:         StageConfig('Queued',           'NEW',                  'col-neutral'),
+    PMStage.SCHEDULED:      StageConfig('Scheduled',        None,                   'col-scheduled'),
     PMStage.SENT:           StageConfig('Sent',             'ATTEMPTED_TO_CONTACT', 'col-active'),
     PMStage.IN_NEGOTIATION: StageConfig('In negotiation',   'CONNECTED',            'col-warm'),
     PMStage.CONFIRMED:      StageConfig('Confirmed',        'OPEN_DEAL',            'col-confirmed'),
@@ -56,6 +58,7 @@ _CONFIGS: dict[PMStage, StageConfig] = {
 STAGE_ORDER: list[PMStage] = [
     PMStage.NEEDS_OUTREACH,
     PMStage.QUEUED,
+    PMStage.SCHEDULED,
     PMStage.SENT,
     PMStage.IN_NEGOTIATION,
     PMStage.CONFIRMED,

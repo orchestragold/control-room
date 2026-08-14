@@ -193,13 +193,40 @@ def board():
         sync_error = str(e)
 
     buckets: dict[PMStage, list] = defaultdict(list)
+    company_by_hs_id: dict[str, object] = {}
     for c in companies:
+        company_by_hs_id[c.hubspot_id] = c
         stage = get_stage(c)
         if stage is not None:
             buckets[stage].append(c)
 
+    # Overlay SCHEDULED: pitch_approvals with status='approved' waiting in the send queue.
+    # Move the matching HubSpot company out of its current bucket into SCHEDULED.
+    # Non-HubSpot approvals get a lightweight placeholder card.
+    from types import SimpleNamespace
+    approved_approvals = PitchApproval.query.filter_by(status='approved').all()
+    scheduled_hs_ids: set[str] = set()
+    for appr in approved_approvals:
+        if appr.hubspot_contact_id:
+            scheduled_hs_ids.add(appr.hubspot_contact_id)
+            company = company_by_hs_id.get(appr.hubspot_contact_id)
+            if company:
+                for stage_bucket in buckets.values():
+                    if company in stage_bucket:
+                        stage_bucket.remove(company)
+                        break
+                buckets[PMStage.SCHEDULED].append(company)
+        else:
+            buckets[PMStage.SCHEDULED].append(SimpleNamespace(
+                hubspot_id='',
+                name=appr.company_name or 'Unknown',
+                reach_out_1=appr.send_date,
+                pitch_type=appr.pitch_type,
+            ))
+
     buckets[PMStage.NEEDS_OUTREACH].sort(key=lambda c: c.name.lower())
     buckets[PMStage.QUEUED].sort(key=lambda c: (c.reach_out_1 or date.max))
+    buckets[PMStage.SCHEDULED].sort(key=lambda c: (c.reach_out_1 or date.max))
     buckets[PMStage.SENT].sort(key=lambda c: (c.reach_out_1 or date.min), reverse=True)
     for s in (PMStage.IN_NEGOTIATION, PMStage.CONFIRMED,
               PMStage.DEPRIORITIZED, PMStage.DECLINED, PMStage.NEEDS_REVIEW):
