@@ -583,6 +583,26 @@ def approve(pid: int):
     return redirect(url_for('pitch_machine.review'))
 
 
+@pm_bp.route('/reject-all', methods=['POST'])
+@login_required
+def reject_all():
+    _require_access()
+    pending = PitchApproval.query.filter_by(status='pending').all()
+    count = len(pending)
+    for approval in pending:
+        approval.status = 'rejected'
+        db.session.add(ApprovalLog(
+            approver_id = current_user.id,
+            action      = 'rejected',
+            entity_type = 'pitch_approval',
+            entity_id   = str(approval.id),
+            details     = {'company_name': approval.company_name, 'bulk': True},
+        ))
+    db.session.commit()
+    flash(f'Cleared {count} pending draft{"s" if count != 1 else ""}. Items remain in the queue for re-drafting.', 'success')
+    return redirect(url_for('pitch_machine.review'))
+
+
 @pm_bp.route('/reject/<int:pid>', methods=['POST'])
 @login_required
 def reject(pid: int):

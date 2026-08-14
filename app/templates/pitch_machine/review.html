@@ -224,6 +224,13 @@
   <h1 class="rv-title">Review Drafts</h1>
   <a href="{{ url_for('pitch_machine.board') }}" class="rv-back">← Board</a>
   <a href="{{ url_for('pitch_machine.draft_queue') }}" class="rv-back">+ Draft more</a>
+  {% if drafts %}
+  <button type="button" class="rv-back" id="reject-all-btn"
+          style="margin-left:auto;color:#f87171;cursor:pointer;background:none;border:none;font-size:13px;"
+          data-url="{{ url_for('pitch_machine.reject_all') }}">
+    Reject all ({{ drafts|length }})
+  </button>
+  {% endif %}
 </div>
 
 <div class="mode-row">
@@ -374,7 +381,7 @@
     });
   });
 
-  // Reject
+  // Reject single
   document.querySelectorAll('.btn-reject').forEach(function (btn) {
     btn.addEventListener('click', function () {
       if (!confirm('Reject this draft? The item stays in the queue for re-drafting.')) return;
@@ -385,6 +392,19 @@
       f.submit();
     });
   });
+
+  // Reject all
+  var rejectAllBtn = document.getElementById('reject-all-btn');
+  if (rejectAllBtn) {
+    rejectAllBtn.addEventListener('click', function () {
+      if (!confirm('Reject all pending drafts? Items stay in the queue for re-drafting.')) return;
+      var f = document.createElement('form');
+      f.method = 'post';
+      f.action = rejectAllBtn.dataset.url;
+      document.body.appendChild(f);
+      f.submit();
+    });
+  }
 })();
 </script>
 {% endblock %}
