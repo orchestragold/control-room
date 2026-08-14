@@ -156,7 +156,7 @@ def list_sent_messages(days_back: int = 90) -> list[dict]:
     resp = requests.get(
         f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
         headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
-        params={'mailbox': sent_folder_id, 'limit': 200, 'sortcriteria': 'date', 'sortorder': 'desc'},
+        params={'folderId': sent_folder_id, 'limit': 200, 'sortcriteria': 'date', 'sortorder': 'desc'},
         timeout=30,
     )
     resp.raise_for_status()
