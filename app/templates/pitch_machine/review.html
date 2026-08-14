@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Review Drafts — The Portal{% endblock %}
+{% block content_class %} wide{% endblock %}
 
 {% block extra_styles %}
 <style>
@@ -7,54 +8,47 @@
     display: flex;
     align-items: baseline;
     gap: 16px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     flex-wrap: wrap;
   }
-  .rv-title { font-size: 18px; font-weight: 300; color: #bbb; }
-  .rv-back  { font-size: 12px; color: #333; text-decoration: none; }
-  .rv-back:hover { color: #666; }
+  .rv-title { font-size: 20px; font-weight: 300; color: #fff; }
+  .rv-back  { font-size: 13px; color: #888; text-decoration: none; }
+  .rv-back:hover { color: #ccc; }
 
-  /* Mode badge */
-  .mode-badge {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 3px 9px;
-    border-radius: 2px;
+  .mode-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 18px;
-    display: inline-block;
   }
-  .mode-badge.test { background: #1c1200; border: 1px solid #3a2800; color: #a16207; }
+  .mode-badge {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 2px;
+  }
+  .mode-badge.test { background: #1c1200; border: 1px solid #3a2800; color: #c8a050; }
   .mode-badge.live { background: #0a1a10; border: 1px solid #1a3020; color: #6aaa7a; }
-  .mode-note { font-size: 11px; color: #333; margin-left: 8px; }
+  .mode-note { font-size: 12px; color: #666; }
 
   .notice {
-    font-size: 12px;
-    padding: 10px 14px;
-    border-radius: 3px;
-    margin-bottom: 18px;
-    line-height: 1.5;
+    font-size: 12px; padding: 10px 14px; border-radius: 3px;
+    margin-bottom: 14px; line-height: 1.5;
   }
   .notice-success { background: #0a1a10; border: 1px solid #1a3020; color: #6aaa7a; }
   .notice-error   { background: #1c0a0a; border: 1px solid #3a1010; color: #f87171; }
 
   .empty-review {
-    font-size: 13px;
-    color: #2a2a2a;
-    text-align: center;
-    padding: 60px 20px;
-    letter-spacing: 0.04em;
+    font-size: 14px; color: #444; text-align: center; padding: 80px 20px;
   }
   .empty-review a { color: #3a6a4a; text-decoration: none; }
   .empty-review a:hover { color: #5aaa6a; }
 
-  /* Draft cards */
+  /* ── Draft card ──────────────────────────────────────────────────────────────── */
+
   .draft-card {
-    background: #0a0a0a;
-    border: 1px solid #1c1c1c;
+    background: #090909;
+    border: 1px solid #1e1e1e;
     border-radius: 3px;
-    margin-bottom: 28px;
+    margin-bottom: 32px;
     overflow: hidden;
   }
   .draft-card:last-child { margin-bottom: 0; }
@@ -64,170 +58,152 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid #141414;
+    padding: 12px 18px;
+    border-bottom: 1px solid #161616;
+    background: #0c0c0c;
     flex-wrap: wrap;
   }
-  .draft-company { font-size: 14px; color: #ccc; font-weight: 400; }
-  .draft-touch   { font-size: 10px; color: #2a2a2a; letter-spacing: 0.06em; text-transform: uppercase; }
+  .draft-company { font-size: 15px; color: #ddd; font-weight: 400; }
+  .header-right  { display: flex; align-items: center; gap: 10px; }
 
-  /* Research brief (collapsible) */
-  .brief-toggle {
-    width: 100%;
-    background: none;
-    border: none;
-    border-bottom: 1px solid #111;
-    padding: 8px 16px;
-    text-align: left;
-    font-size: 11px;
-    color: #2a2a2a;
-    cursor: pointer;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+  .type-chip {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 2px;
+  }
+  .type-Festival    { background: #0a1a10; border: 1px solid #1a3020; color: #5aaa7a; }
+  .type-WAA         { background: #0a0e1c; border: 1px solid #1a2050; color: #5a7aaa; }
+  .type-PNW         { background: #1a1000; border: 1px solid #402800; color: #c8900a; }
+  .type-Show-Invite { background: #1a0e1a; border: 1px solid #3a1a40; color: #aa5aaa; }
+  .touch-label { font-size: 11px; color: #444; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  /* ── Two-column layout ───────────────────────────────────────────────────────── */
+
+  .draft-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    min-height: 400px;
+  }
+
+  /* ── Left: compose ───────────────────────────────────────────────────────────── */
+
+  .compose-col {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    border-right: 1px solid #161616;
   }
-  .brief-toggle:hover { color: #444; }
-  .brief-toggle .arrow { display: inline-block; transition: transform 0.15s; }
-  .brief-toggle.open .arrow { transform: rotate(90deg); }
 
-  .brief-body {
-    display: none;
-    padding: 12px 16px;
-    font-size: 12px;
-    color: #3a3a3a;
-    line-height: 1.65;
-    border-bottom: 1px solid #111;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .brief-body.open { display: block; }
-
-  /* Compose form */
-  .compose-form { padding: 14px 16px; }
+  .field-rows { padding: 0; }
 
   .field-row {
     display: grid;
-    grid-template-columns: 60px 1fr;
+    grid-template-columns: 56px 1fr;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 10px;
+    padding: 10px 18px;
     border-bottom: 1px solid #111;
-    padding-bottom: 8px;
   }
-  .field-row:last-of-type { border-bottom: none; }
-
   .field-label {
-    font-size: 11px;
-    color: #2a2a2a;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-size: 10px; color: #555; letter-spacing: 0.08em; text-transform: uppercase;
   }
-
   .field-input {
-    background: none;
-    border: none;
-    outline: none;
-    color: #888;
-    font-size: 13px;
-    font-family: inherit;
-    width: 100%;
-    padding: 0;
+    background: none; border: none; outline: none;
+    color: #ccc; font-size: 13px; font-family: inherit; width: 100%; padding: 0;
   }
-  .field-input:focus { color: #bbb; }
-  .field-input::placeholder { color: #2a2a2a; }
+  .field-input:focus { color: #eee; }
+  .field-input::placeholder { color: #333; }
 
-  .body-field {
-    margin-top: 12px;
-    border-top: 1px solid #111;
-    padding-top: 0;
-  }
+  /* Editor */
+  .body-col { flex: 1; display: flex; flex-direction: column; }
 
-  /* Formatting toolbar */
   .editor-toolbar {
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 6px 0 6px;
+    padding: 7px 18px;
     border-bottom: 1px solid #111;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
+    background: #0a0a0a;
   }
   .tb-btn {
-    background: none;
-    border: 1px solid transparent;
-    color: #555;
-    font-size: 12px;
-    padding: 3px 8px;
-    border-radius: 2px;
-    cursor: pointer;
-    line-height: 1.4;
-    transition: color 0.1s, border-color 0.1s;
+    background: none; border: 1px solid transparent; color: #555;
+    font-size: 12px; padding: 3px 9px; border-radius: 2px;
+    cursor: pointer; line-height: 1.4; transition: color 0.1s, border-color 0.1s;
   }
   .tb-btn:hover { color: #ccc; border-color: #333; }
-  .tb-sep { width: 1px; height: 16px; background: #222; margin: 0 4px; }
+  .tb-sep { width: 1px; height: 16px; background: #1e1e1e; margin: 0 4px; }
 
-  /* Editable body */
   .body-editor {
+    flex: 1;
     outline: none;
     color: #ccc;
     font-size: 15px;
     font-family: inherit;
-    line-height: 1.8;
-    width: 100%;
+    line-height: 1.85;
+    padding: 16px 18px;
     min-height: 320px;
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .body-editor:empty::before {
-    content: attr(data-placeholder);
-    color: #333;
-  }
-  .body-editor a { color: #5a9adf; text-decoration: underline; cursor: pointer; }
+  .body-editor:empty::before { content: attr(data-placeholder); color: #2a2a2a; }
+  .body-editor a { color: #5a9adf; text-decoration: underline; }
   .body-editor a:hover { color: #7ab8ff; }
 
-  /* Action buttons */
+  /* Actions */
   .draft-actions {
     display: flex;
     gap: 10px;
-    padding: 12px 16px;
+    padding: 12px 18px;
     border-top: 1px solid #111;
-    flex-wrap: wrap;
     align-items: center;
+    flex-wrap: wrap;
+    background: #0a0a0a;
   }
-
   .btn-approve {
-    background: #1a2e1a;
-    border: 1px solid #2a4a2a;
-    color: #6aaa7a;
-    font-size: 12px;
-    padding: 6px 18px;
-    border-radius: 3px;
-    cursor: pointer;
-    letter-spacing: 0.03em;
-    transition: background 0.1s, border-color 0.1s;
+    background: #1a2e1a; border: 1px solid #2a4a2a; color: #6aaa7a;
+    font-size: 13px; padding: 7px 20px; border-radius: 3px; cursor: pointer;
+    letter-spacing: 0.03em; transition: background 0.1s, border-color 0.1s;
   }
   .btn-approve:hover { background: #223022; border-color: #3a5a3a; }
-
   .btn-reject {
-    background: none;
-    border: 1px solid #2a2a2a;
-    color: #444;
-    font-size: 12px;
-    padding: 6px 14px;
-    border-radius: 3px;
-    cursor: pointer;
-    letter-spacing: 0.03em;
+    background: none; border: 1px solid #222; color: #555;
+    font-size: 13px; padding: 7px 14px; border-radius: 3px; cursor: pointer;
     transition: border-color 0.1s, color 0.1s;
   }
-  .btn-reject:hover { border-color: #4a1010; color: #f87171; }
+  .btn-reject:hover { border-color: #5a1010; color: #f87171; }
 
-  .draft-more-link {
-    margin-left: auto;
-    font-size: 11px;
-    color: #2a2a2a;
-    text-decoration: none;
+  /* ── Right: research brief ───────────────────────────────────────────────────── */
+
+  .research-col {
+    background: #060606;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .research-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #444; padding: 12px 16px 8px; border-bottom: 1px solid #111; flex-shrink: 0;
+  }
+  .research-content {
+    flex: 1;
+    font-size: 12px;
+    color: #666;
+    line-height: 1.7;
+    padding: 12px 16px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+  }
+  /* Highlight ⚠ gap flags in the brief */
+  .research-content { }
+
+  .no-brief {
+    font-size: 12px; color: #2a2a2a; padding: 20px 16px; font-style: italic;
+  }
+
+  /* ── Mobile: stack vertically ────────────────────────────────────────────────── */
+  @media (max-width: 860px) {
+    .draft-layout { grid-template-columns: 1fr; }
+    .compose-col  { border-right: none; border-bottom: 1px solid #161616; }
+    .research-col { max-height: 280px; }
   }
 </style>
 {% endblock %}
@@ -239,12 +215,14 @@
   <a href="{{ url_for('pitch_machine.draft_queue') }}" class="rv-back">+ Draft more</a>
 </div>
 
-<span class="mode-badge {{ 'test' if test_mode else 'live' }}">
-  {{ 'test mode' if test_mode else 'live mode' }}
-</span>
-{% if test_mode %}
-<span class="mode-note">Approving sends to {{ redirect_email }}</span>
-{% endif %}
+<div class="mode-row">
+  <span class="mode-badge {{ 'test' if test_mode else 'live' }}">
+    {{ 'test mode' if test_mode else 'live mode' }}
+  </span>
+  {% if test_mode %}
+  <span class="mode-note">Approving sends to {{ redirect_email }}</span>
+  {% endif %}
+</div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}
@@ -263,101 +241,92 @@
 <div class="draft-card" id="draft-{{ draft.id }}">
 
   <div class="draft-card-header">
-    <div>
-      <div class="draft-company">{{ draft.company_name or 'Unknown festival' }}</div>
+    <div class="draft-company">{{ draft.company_name or 'Unknown' }}</div>
+    <div class="header-right">
+      {% set pt = draft.pitch_type or 'Festival' %}
+      <span class="type-chip type-{{ pt | replace(' ', '-') }}">{{ pt }}</span>
+      <span class="touch-label">Touch {{ draft.touch_number }}</span>
     </div>
-    <span class="draft-touch">Touch {{ draft.touch_number }}</span>
   </div>
 
-  {% if draft.research_notes %}
-  <button class="brief-toggle" type="button"
-          data-target="brief-{{ draft.id }}"
-          aria-expanded="false">
-    <span class="arrow">▶</span> Research brief
-  </button>
-  <div class="brief-body" id="brief-{{ draft.id }}">{{ draft.research_notes }}</div>
-  {% endif %}
+  <div class="draft-layout">
 
-  <form class="compose-form"
-        method="post"
-        action="{{ url_for('pitch_machine.approve', pid=draft.id) }}">
+    <!-- ── Left: compose ──────────────────────────────────────────────────── -->
+    <div class="compose-col">
+      <form method="post"
+            action="{{ url_for('pitch_machine.approve', pid=draft.id) }}"
+            class="compose-form"
+            style="display:flex;flex-direction:column;flex:1;">
 
-    <div class="field-row">
-      <span class="field-label">To</span>
-      <input class="field-input"
-             type="email"
-             name="to_email"
-             value="{{ draft.to_email or '' }}"
-             placeholder="buyer@festival.com"
-             required>
-    </div>
-    <div class="field-row">
-      <span class="field-label">CC</span>
-      <input class="field-input"
-             type="text"
-             name="cc_email"
-             value="{{ draft.cc_email or 'booking@orchestragold.com' }}">
-    </div>
-    <div class="field-row">
-      <span class="field-label">Subject</span>
-      <input class="field-input"
-             type="text"
-             name="subject"
-             value="{{ draft.draft_subject or '' }}"
-             placeholder="Subject line">
-    </div>
+        <div class="field-rows">
+          <div class="field-row">
+            <span class="field-label">To</span>
+            <input class="field-input" type="email" name="to_email"
+                   value="{{ draft.to_email or '' }}"
+                   placeholder="buyer@venue.com" required>
+          </div>
+          <div class="field-row">
+            <span class="field-label">CC</span>
+            <input class="field-input" type="text" name="cc_email"
+                   value="{{ draft.cc_email or 'booking@orchestragold.com' }}">
+          </div>
+          <div class="field-row">
+            <span class="field-label">Subject</span>
+            <input class="field-input" type="text" name="subject"
+                   value="{{ draft.draft_subject or '' }}"
+                   placeholder="Subject line">
+          </div>
+        </div>
 
-    <div class="body-field">
-      <div class="editor-toolbar">
-        <button type="button" class="tb-btn" data-cmd="bold" title="Bold">B</button>
-        <button type="button" class="tb-btn" data-cmd="italic" title="Italic"><em>i</em></button>
-        <div class="tb-sep"></div>
-        <button type="button" class="tb-btn" data-cmd="link" title="Insert link">⊞ link</button>
-        <button type="button" class="tb-btn" data-cmd="unlink" title="Remove link">✕ link</button>
-        <div class="tb-sep"></div>
-        <button type="button" class="tb-btn" data-cmd="removeFormat" title="Clear formatting">clear</button>
-      </div>
-      <div class="body-editor"
-           contenteditable="true"
-           data-placeholder="Pitch body…"
-           data-for="body-{{ draft.id }}">{{ draft.draft_body | safe }}</div>
-      <input type="hidden" name="body" id="body-{{ draft.id }}">
-    </div>
+        <div class="body-col">
+          <div class="editor-toolbar">
+            <button type="button" class="tb-btn" data-cmd="bold">B</button>
+            <button type="button" class="tb-btn" data-cmd="italic"><em>i</em></button>
+            <div class="tb-sep"></div>
+            <button type="button" class="tb-btn" data-cmd="link">⊞ link</button>
+            <button type="button" class="tb-btn" data-cmd="unlink">✕ link</button>
+            <div class="tb-sep"></div>
+            <button type="button" class="tb-btn" data-cmd="removeFormat">clear</button>
+          </div>
+          <div class="body-editor"
+               contenteditable="true"
+               data-placeholder="Pitch body…"
+               data-for="body-{{ draft.id }}">{{ draft.draft_body | safe }}</div>
+          <input type="hidden" name="body" id="body-{{ draft.id }}">
+        </div>
 
-    <div class="draft-actions">
-      <button type="submit" class="btn-approve">good to go</button>
+        <div class="draft-actions">
+          <button type="submit" class="btn-approve">good to go</button>
+          <button type="button" class="btn-reject"
+                  data-reject-url="{{ url_for('pitch_machine.reject', pid=draft.id) }}">
+            reject
+          </button>
+        </div>
 
-      <button type="button"
-              class="btn-reject"
-              data-reject-url="{{ url_for('pitch_machine.reject', pid=draft.id) }}">
-        reject
-      </button>
+      </form>
     </div>
 
-  </form>
-</div>
+    <!-- ── Right: research brief ──────────────────────────────────────────── -->
+    <div class="research-col">
+      <div class="research-label">Research Brief</div>
+      {% if draft.research_notes %}
+      <div class="research-content">{{ draft.research_notes }}</div>
+      {% else %}
+      <div class="no-brief">No research brief — generated without knowledge sync.</div>
+      {% endif %}
+    </div>
+
+  </div><!-- /.draft-layout -->
+</div><!-- /.draft-card -->
 {% endfor %}
 
 {% endif %}
 
 <script>
 (function () {
-  // ── Research brief toggles ────────────────────────────────────────────────────
-  document.querySelectorAll('.brief-toggle').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var body = document.getElementById(btn.dataset.target);
-      var open = body.classList.toggle('open');
-      btn.classList.toggle('open', open);
-      btn.setAttribute('aria-expanded', open);
-    });
-  });
-
-  // ── Contenteditable editor ────────────────────────────────────────────────────
-
-  // Render plain-text bodies (newlines → <br>) on load
+  // Plain-text body → HTML on load
   document.querySelectorAll('.body-editor').forEach(function (el) {
     var text = el.innerHTML;
-    // If it looks like plain text (no HTML tags beyond maybe &amp; etc.), convert newlines
     if (!/<[a-zA-Z]/.test(text)) {
       el.innerHTML = text
         .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -365,10 +334,10 @@
     }
   });
 
-  // Toolbar buttons
+  // Toolbar
   document.querySelectorAll('.tb-btn').forEach(function (btn) {
     btn.addEventListener('mousedown', function (e) {
-      e.preventDefault(); // keep focus in editor
+      e.preventDefault();
       var cmd = btn.dataset.cmd;
       if (cmd === 'link') {
         var url = prompt('URL (include https://):');
@@ -381,21 +350,20 @@
     });
   });
 
-  // Sync contenteditable → hidden input before each form submit
+  // Sync editor → hidden input on submit
   document.querySelectorAll('.compose-form').forEach(function (form) {
     form.addEventListener('submit', function () {
       form.querySelectorAll('.body-editor').forEach(function (editor) {
-        var hiddenId = editor.dataset.for;
-        var hidden   = document.getElementById(hiddenId);
+        var hidden = document.getElementById(editor.dataset.for);
         if (hidden) hidden.value = editor.innerHTML;
       });
     });
   });
 
-  // ── Reject buttons ────────────────────────────────────────────────────────────
+  // Reject
   document.querySelectorAll('.btn-reject').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      if (!confirm('Reject this draft?')) return;
+      if (!confirm('Reject this draft? The item stays in the queue for re-drafting.')) return;
       var f = document.createElement('form');
       f.method = 'post';
       f.action = btn.dataset.rejectUrl;
