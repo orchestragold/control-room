@@ -111,6 +111,65 @@
   .btn-generate:disabled { opacity: 0.4; cursor: default; }
   .selected-count { font-size: 13px; color: #aaa; }
   .limit-note     { font-size: 12px; color: #666; }
+
+  /* ── Progress overlay ────────────────────────────────────────────────────── */
+  #gen-progress {
+    display: none;
+    margin-top: 28px;
+    padding: 24px 20px;
+    background: #0a0a0a;
+    border: 1px solid #1e1e1e;
+    border-radius: 3px;
+  }
+  .gen-headline {
+    font-size: 14px; color: #ccc; margin-bottom: 16px;
+  }
+  .gen-headline strong { color: #fff; }
+
+  .progress-track {
+    height: 4px;
+    background: #1a1a1a;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #2a6a3a, #4aaa6a);
+    border-radius: 2px;
+    transition: width 1s linear;
+  }
+
+  .gen-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 12px;
+  }
+  #gen-elapsed { font-variant-numeric: tabular-nums; }
+
+  .gen-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 14px;
+  }
+  .gen-step {
+    font-size: 12px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .gen-step.active { color: #7aaa8a; }
+  .gen-step.active::before { content: '›'; }
+  .gen-step:not(.active)::before { content: ' '; display: inline-block; width: 8px; }
+
+  .gen-note {
+    font-size: 11px; color: #333; margin-top: 14px; line-height: 1.5;
+  }
 </style>
 {% endblock %}
 
@@ -198,6 +257,20 @@
     <span class="selected-count" id="selected-count">0 selected</span>
     <span class="limit-note">max {{ batch_limit }} per batch</span>
   </div>
+
+  <div id="gen-progress">
+    <div class="gen-headline">Generating <strong id="gen-count-label">0</strong> draft<span id="gen-plural">s</span></div>
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <div class="gen-meta">
+      <span id="gen-eta"></span>
+      <span id="gen-elapsed">0:00 elapsed</span>
+    </div>
+    <div class="gen-steps" id="gen-steps"></div>
+    <p class="gen-note">Page redirects automatically when complete — don't close this tab.</p>
+  </div>
+
 </form>
 
 <script>
@@ -209,6 +282,7 @@
   var selectNone = document.getElementById('select-none');
   var limit      = {{ batch_limit }};
   var ok         = {{ 'true' if knowledge_ready else 'false' }};
+  var SECS_PER_PITCH = 20; // conservative estimate
 
   function update() {
     var n = form.querySelectorAll('input[name="entry_id"]:checked').length;
@@ -225,8 +299,72 @@
     form.querySelectorAll('input[name="entry_id"]').forEach(function (cb) { cb.checked = false; });
     update();
   });
+
   form.addEventListener('submit', function () {
-    btn.textContent = 'Generating…';
+    var checked = form.querySelectorAll('input[name="entry_id"]:checked');
+    var n = checked.length;
+    if (n === 0) return;
+
+    // Hide the list, show progress
+    document.querySelector('.dq-controls').style.display = 'none';
+    document.querySelector('.entry-list').style.display = 'none';
+    document.querySelector('.dq-footer').style.display = 'none';
+    document.getElementById('gen-progress').style.display = 'block';
+
+    // Labels
+    document.getElementById('gen-count-label').textContent = n;
+    document.getElementById('gen-plural').textContent = n === 1 ? '' : 's';
+
+    var totalSecs = n * SECS_PER_PITCH;
+    var mins = Math.ceil(totalSecs / 60);
+    document.getElementById('gen-eta').textContent =
+      '~' + (mins === 1 ? '1 minute' : mins + ' minutes') + ' estimated';
+
+    // Build step list from selected names
+    var stepsEl = document.getElementById('gen-steps');
+    checked.forEach(function (cb, i) {
+      var row  = cb.closest('.entry-row');
+      var name = row ? row.querySelector('.entry-name').textContent.trim() : ('Pitch ' + (i + 1));
+      var div  = document.createElement('div');
+      div.className = 'gen-step' + (i === 0 ? ' active' : '');
+      div.id = 'step-' + i;
+      div.textContent = name;
+      stepsEl.appendChild(div);
+    });
+
+    // Animate progress bar — fills to 90% over estimated time, then crawls
+    var fill     = document.getElementById('progress-fill');
+    var elapsedEl = document.getElementById('gen-elapsed');
+    var startTime = Date.now();
+    var stepDuration = totalSecs * 1000;
+
+    function tick() {
+      var elapsed = Date.now() - startTime;
+      var secs    = Math.floor(elapsed / 1000);
+      var m = Math.floor(secs / 60);
+      var s = secs % 60;
+      elapsedEl.textContent = m + ':' + (s < 10 ? '0' : '') + s + ' elapsed';
+
+      // Which step are we on (estimate)
+      var stepIdx = Math.min(Math.floor(elapsed / (SECS_PER_PITCH * 1000)), n - 1);
+      document.querySelectorAll('.gen-step').forEach(function (el, i) {
+        el.classList.toggle('active', i === stepIdx);
+      });
+
+      // Progress: 0→90% over estimated time, then 90→98% slowly
+      var pct;
+      if (elapsed < stepDuration) {
+        pct = (elapsed / stepDuration) * 90;
+      } else {
+        var overage = elapsed - stepDuration;
+        pct = 90 + Math.min(8, (overage / 30000) * 8); // crawl to 98%
+      }
+      fill.style.width = pct.toFixed(1) + '%';
+    }
+
+    var timer = setInterval(tick, 500);
+    tick();
+
     btn.disabled = true;
   });
 })();
