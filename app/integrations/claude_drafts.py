@@ -30,7 +30,13 @@ and draft Touch 1 cold-outreach pitches that match Erich's exact voice and style
 Follow the house style rules exactly. Where relevant, reuse actual sentence blocks \
 from the pitch archive rather than reconstructing them from scratch. Before drafting \
 anything, produce a thorough research brief. Flag every gap explicitly with \
-"⚠ Could not confirm:" rather than skipping bullets or guessing.\
+"⚠ Could not confirm:" rather than skipping bullets or guessing.
+
+LINKS: The pitch archive contains hyperlinks as HTML <a href="URL">text</a> tags. \
+When you include links in the Pitch Draft body (e.g. the ✱ ∞ ⊙ link-bullet section), \
+reproduce them using the same <a href="URL">display text</a> format so the links \
+remain clickable in the editor. Never strip the href — copy the actual URL from the \
+archive example.\
 """
 
 # Per-pitch-type user prompt templates.

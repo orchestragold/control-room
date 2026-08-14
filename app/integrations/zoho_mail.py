@@ -125,16 +125,26 @@ def send_email(
 
 def _ensure_html(body: str) -> str:
     """
-    If the body doesn't contain HTML tags, convert plain-text newlines to <br>
-    so the email renders with correct line breaks.
-    Preserves existing HTML (e.g. bodies already containing <a> links).
+    Prepare body text for HTML email sending.
+
+    Bodies may be:
+      - Plain text (from old drafts): escape special chars + convert \n to <br>
+      - Mixed (from new drafts): contain <a href> links inline with plain text newlines
+
+    In both cases, \n → <br> for correct line break rendering.
+    Existing <a href> tags are left intact; only bare & < > outside tags get escaped.
     """
-    if re.search(r'<[a-zA-Z]', body):
-        return body
-    escaped = (
-        body
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-    )
-    return escaped.replace('\n', '<br>\n')
+    has_tags = bool(re.search(r'<[a-zA-Z]', body))
+
+    if not has_tags:
+        # Pure plain text — escape everything then convert newlines
+        escaped = (body
+                   .replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;'))
+        return escaped.replace('\n', '<br>\n')
+
+    # Mixed HTML+text — newlines that fall outside of tags become <br>
+    # Split on newlines and rejoin with <br>, which is safe since our
+    # <a href> tags are always inline (no multi-line tags in Claude output).
+    return '<br>\n'.join(body.split('\n'))

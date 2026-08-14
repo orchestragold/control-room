@@ -82,12 +82,33 @@ def _download_file(path: str, access_token: str) -> bytes:
 
 
 def _extract_text(path: str, raw: bytes) -> str:
-    """Convert raw file bytes to plain text, with .docx support."""
+    """
+    Convert raw file bytes to text suitable for Claude's knowledge context.
+    For .docx files: uses mammoth to convert to HTML, then strips all tags
+    except <a href> so hyperlinks survive into the prompt. This lets Claude
+    reproduce actual link URLs (KEXP, Live, IG, etc.) in generated drafts
+    rather than outputting bare link text with no href.
+    """
     if path.endswith('.docx'):
         try:
-            from docx import Document
-            doc = Document(io.BytesIO(raw))
-            return '\n'.join(p.text for p in doc.paragraphs if p.text.strip())
+            import mammoth
+            import re
+            result = mammoth.convert_to_html(io.BytesIO(raw))
+            html = result.value
+            # Strip every tag EXCEPT <a href="...">...</a>
+            # Keep the link structure so Claude can reproduce real URLs.
+            text = re.sub(r'<(?!/?a\b)[^>]+>', '', html)
+            # Decode common HTML entities
+            text = (text
+                    .replace('&amp;', '&')
+                    .replace('&lt;', '<')
+                    .replace('&gt;', '>')
+                    .replace('&nbsp;', ' ')
+                    .replace('&#x27;', "'")
+                    .replace('&quot;', '"'))
+            # Collapse excessive blank lines
+            text = re.sub(r'\n{3,}', '\n\n', text).strip()
+            return text
         except Exception as e:
             raise DropboxError(f'Could not parse .docx at {path!r}: {e}')
     return raw.decode('utf-8', errors='replace')
