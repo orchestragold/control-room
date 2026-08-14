@@ -341,11 +341,13 @@ def generate():
     from app.integrations.dropbox_sync import get_or_create_queue_csv, DropboxError
     from app.integrations.pitch_queue import parse_queue
 
-    try:
-        generator = DraftGenerator()
-    except DraftGenerationError as e:
-        flash(str(e), 'error')
-        return redirect(url_for('pitch_machine.draft_queue'))
+    # Generators are cached per pitch type — one instance per type in the batch
+    _generators: dict[str, DraftGenerator] = {}
+
+    def _get_generator(pitch_type: str) -> DraftGenerator:
+        if pitch_type not in _generators:
+            _generators[pitch_type] = DraftGenerator(pitch_type=pitch_type)
+        return _generators[pitch_type]
 
     # Load queue sheet items for lookup
     try:
@@ -380,7 +382,7 @@ def generate():
                 continue
 
             try:
-                draft = generator.generate(
+                draft = _get_generator('Festival').generate(
                     name=company.name,
                     website=company.website,
                     description=company.description,
@@ -418,7 +420,7 @@ def generate():
                 continue
 
             try:
-                draft = generator.generate(
+                draft = _get_generator(item.pitch_type).generate(
                     name=item_name,
                     website=None,
                     description=item.notes or None,

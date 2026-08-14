@@ -21,12 +21,21 @@ from flask import current_app
 
 from app.extensions import db
 
-# Canonical Dropbox paths for the Pitch Machine knowledge base.
-# The .docx is the curated real-pitch archive ("when Sabbath went to Mali…").
-KNOWLEDGE_PATHS = [
-    '/PITCH_MACHINE_RULES.md',
-    '/2026 pitches.docx',
-]
+# House style rules — applies to every pitch type.
+RULES_PATH = '/PITCH_MACHINE_RULES.md'
+
+# Per-pitch-type archive files. Each maps a pitch_type value to its Dropbox path.
+# The archive for that type is loaded alongside RULES_PATH at draft-generation time.
+ARCHIVE_PATHS: dict[str, str] = {
+    'Festival':    '/2026 pitches.docx',
+    'WAA':         '/WAA pitches.docx',
+    'PNW':         '/PNW pitches.docx',
+    'Show Invite': '/2026 pitches.docx',   # reuse festival archive until dedicated one exists
+    'Distribution':'/2026 pitches.docx',   # same
+}
+
+# All paths that need to be in the DB cache (rules + every archive).
+KNOWLEDGE_PATHS = [RULES_PATH] + sorted(set(ARCHIVE_PATHS.values()))
 
 _TOKEN_URL   = 'https://api.dropbox.com/oauth2/token'
 _DOWNLOAD_URL = 'https://content.dropboxapi.com/2/files/download'
@@ -169,7 +178,7 @@ def sync_knowledge_to_cache(paths: Optional[list[str]] = None) -> dict[str, int]
 def get_knowledge_content() -> dict[str, str]:
     """
     Return cached content for all KNOWLEDGE_PATHS.
-    Raises DropboxError if any path hasn't been synced yet.
+    Raises DropboxError if the rules file or any archive hasn't been synced yet.
     """
     from app.models.knowledge import DropboxSync
 
@@ -181,3 +190,27 @@ def get_knowledge_content() -> dict[str, str]:
             f'Missing: {missing}'
         )
     return {p: records[p] for p in KNOWLEDGE_PATHS}
+
+
+def get_knowledge_for_pitch_type(pitch_type: str) -> tuple[str, str]:
+    """
+    Return (rules_content, archive_content) for a given pitch type.
+    Falls back to the Festival archive for unknown types.
+    Raises DropboxError if the required files haven't been synced.
+    """
+    from app.models.knowledge import DropboxSync
+
+    archive_path = ARCHIVE_PATHS.get(pitch_type, ARCHIVE_PATHS['Festival'])
+    needed = [RULES_PATH, archive_path]
+
+    records = {r.path: r.content for r in DropboxSync.query.filter(
+        DropboxSync.path.in_(needed)
+    ).all() if r.content}
+
+    missing = [p for p in needed if p not in records]
+    if missing:
+        raise DropboxError(
+            f'Knowledge not synced for pitch type {pitch_type!r} — '
+            f'run `flask sync-knowledge`. Missing: {missing}'
+        )
+    return records[RULES_PATH], records[archive_path]
