@@ -17,7 +17,8 @@ from flask import (
 from flask_login import current_user, login_required
 
 from app.core.mode import is_test_mode, resolve_email_recipient
-from app.extensions import db
+from app.extensions import csrf, db
+from app.utils.sanitize import sanitize_body_html
 from app.integrations.hubspot import (
     HubSpotClient,
     HubSpotError,
@@ -120,9 +121,14 @@ def _build_queue(companies: list) -> list[QueueEntry]:
 
     # ── Source 2: Dropbox queue sheet ────────────────────────────────────────────
     try:
+        from app.integrations.dropbox_sync import DropboxError as _DropboxError
         csv_content = get_or_create_queue_csv()
         queue_items = parse_queue(csv_content)
-    except Exception:
+    except _DropboxError as e:
+        flash(f'Dropbox queue sheet unavailable: {e}', 'error')
+        queue_items = []
+    except Exception as e:
+        flash(f'Could not load queue sheet: {e}', 'error')
         queue_items = []
 
     existing_hs_ids = {e.hubspot_id for e in entries if e.hubspot_id}
@@ -223,6 +229,7 @@ def board():
 
 @pm_bp.route('/sync', methods=['POST'])
 @login_required
+@csrf.exempt
 def sync():
     _require_access()
     try:
@@ -234,6 +241,7 @@ def sync():
 
 @pm_bp.route('/move', methods=['POST'])
 @login_required
+@csrf.exempt
 def move():
     _require_access()
 
@@ -402,6 +410,7 @@ def generate():
                 research_notes     = draft.research_notes,
                 to_email           = _extract_email(draft.research_notes),
                 cc_email           = _DEFAULT_CC,
+                send_date          = company.reach_out_1,
                 status             = 'pending',
             ))
             created += 1
@@ -441,6 +450,7 @@ def generate():
                 research_notes     = draft.research_notes,
                 to_email           = _extract_email(item.notes, draft.research_notes),
                 cc_email           = _DEFAULT_CC,
+                send_date          = item.send_date,
                 status             = 'pending',
             ))
             created += 1
@@ -491,7 +501,7 @@ def approve(pid: int):
         return redirect(url_for('pitch_machine.review'))
 
     subject  = request.form.get('subject', '').strip()
-    body     = request.form.get('body', '').strip()
+    body     = sanitize_body_html(request.form.get('body', '').strip())
     to_email = request.form.get('to_email', '').strip()
     cc_email = request.form.get('cc_email', '').strip()
     send_date_str = request.form.get('send_date', '').strip()
@@ -513,6 +523,7 @@ def approve(pid: int):
     approval.draft_body    = body
     approval.to_email      = to_email
     approval.cc_email      = cc_email
+    approval.send_date     = send_date
     approval.status        = 'approved'
     approval.approved_by   = current_user.id
     approval.approved_at   = datetime.utcnow()
@@ -533,15 +544,11 @@ def approve(pid: int):
         },
     ))
 
-    # ── Atomic action (decision #10) ─────────────────────────────────────────────
-    # 1. Remove from queue sheet
-    # 2. Write reach_out_1 to HubSpot (Festival only; non-Festival blocked)
-    hs_write_error = None
-
+    # ── Atomic action ────────────────────────────────────────────────────────────
+    # 1. Remove from queue sheet (best-effort; logged to stderr on failure)
+    # 2. Write reach_out_1 to HubSpot for any pitch with a known company ID
     _remove_from_queue_sheet(approval.company_name)
 
-    # Write reach_out_1 to HubSpot for any pitch type that has a known company ID.
-    # Queue-sheet items without a hubspot_contact_id are skipped silently.
     hs_write_error = None
     if approval.hubspot_contact_id:
         hs_write_error = _write_hubspot_reach_out_1(
@@ -678,8 +685,9 @@ def _remove_from_queue_sheet(company_name: str) -> None:
                 changed = True
         if changed:
             upload_file(QUEUE_PATH, serialize_queue(items))
-    except Exception:
-        pass  # queue sheet removal is best-effort; HubSpot write is the source of truth
+    except Exception as e:
+        import sys
+        print(f'[queue sheet] remove failed for {company_name!r}: {e}', file=sys.stderr)
 
 
 def _write_hubspot_reach_out_1(hubspot_id: str, send_date: Optional[date]) -> Optional[str]:

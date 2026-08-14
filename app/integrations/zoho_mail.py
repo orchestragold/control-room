@@ -12,7 +12,6 @@ on every send within the same process lifetime.
 from __future__ import annotations
 
 import re
-from functools import lru_cache
 from typing import Optional
 
 import requests

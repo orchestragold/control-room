@@ -196,6 +196,7 @@
 </div>
 
 <form method="post" action="{{ url_for('pitch_machine.generate') }}" id="dq-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="dq-controls">
     <span>{{ entries|length }} items queued — sorted by send date</span>
     <button type="button" class="btn-link" id="select-all">select all</button>

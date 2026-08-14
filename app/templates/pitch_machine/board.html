@@ -214,7 +214,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="pm-header">
+<div class="pm-header"
+     data-move-url="{{ url_for('pitch_machine.move') }}"
+     data-sync-url="{{ url_for('pitch_machine.sync') }}">
   <h1 class="pm-title">Pitch Machine</h1>
   <div class="pm-meta">
     {% if pending_count %}
@@ -336,7 +338,8 @@
 
       var el = draggingEl;
 
-      fetch('/projects/orchestra-gold/pitch-machine/move', {
+      var moveUrl = document.querySelector('.pm-header').dataset.moveUrl;
+      fetch(moveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hubspot_id: draggingId, to_stage: toStage })
@@ -383,7 +386,8 @@
     syncBtn.disabled = true;
     syncBtn.textContent = 'Syncing…';
 
-    fetch('/projects/orchestra-gold/pitch-machine/sync', {
+    var syncUrl = document.querySelector('.pm-header').dataset.syncUrl;
+    fetch(syncUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
     })

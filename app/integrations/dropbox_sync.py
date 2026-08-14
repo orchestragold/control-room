@@ -24,8 +24,7 @@ from app.extensions import db
 # House style rules — applies to every pitch type.
 RULES_PATH = '/PITCH_MACHINE_RULES.md'
 
-# Per-pitch-type archive files. Each maps a pitch_type value to its Dropbox path.
-# The archive for that type is loaded alongside RULES_PATH at draft-generation time.
+# Per-pitch-type archive files. Keys must match PITCH_TYPES in pitch_machine/pitch_types.py.
 ARCHIVE_PATHS: dict[str, str] = {
     'Festival':    '/2026 pitches.docx',
     'WAA':         '/WAA pitches.docx',

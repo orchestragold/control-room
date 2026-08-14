@@ -153,6 +153,8 @@ Body:
 [full pitch body]\
 """
 
+from app.pitch_machine.pitch_types import PITCH_TYPE_SET  # noqa: E402
+
 _TEMPLATES = {
     'Festival':    _FESTIVAL_TEMPLATE,
     'WAA':         _WAA_TEMPLATE,
@@ -201,6 +203,8 @@ class DraftGenerator:
         except DropboxError as e:
             raise DraftGenerationError(str(e))
 
+        if pitch_type not in PITCH_TYPE_SET:
+            raise DraftGenerationError(f'Unknown pitch type: {pitch_type!r}')
         self._pitch_type = pitch_type
         self._template   = _TEMPLATES.get(pitch_type, _DEFAULT_TEMPLATE)
         self._client     = self._anthropic.Anthropic(api_key=api_key)

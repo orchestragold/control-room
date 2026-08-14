@@ -308,6 +308,7 @@
             action="{{ url_for('pitch_machine.approve', pid=draft.id) }}"
             class="compose-form"
             style="display:flex;flex-direction:column;flex:1;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <div class="field-rows">
           <div class="field-row">
@@ -326,6 +327,12 @@
             <input class="field-input" type="text" name="subject"
                    value="{{ draft.draft_subject or '' }}"
                    placeholder="Subject line">
+          </div>
+          <div class="field-row">
+            <span class="field-label">Send date</span>
+            <input class="field-input" type="date" name="send_date"
+                   value="{{ draft.send_date.isoformat() if draft.send_date else '' }}"
+                   title="Written to HubSpot reach_out_1 on approve">
           </div>
         </div>
 
@@ -459,15 +466,24 @@
     });
   });
 
+  var csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+  function postForm(action) {
+    var f = document.createElement('form');
+    f.method = 'post';
+    f.action = action;
+    var tok = document.createElement('input');
+    tok.type = 'hidden'; tok.name = 'csrf_token'; tok.value = csrfToken;
+    f.appendChild(tok);
+    document.body.appendChild(f);
+    f.submit();
+  }
+
   // Reject single
   document.querySelectorAll('.btn-reject').forEach(function (btn) {
     btn.addEventListener('click', function () {
       if (!confirm('Reject this draft? The item stays in the queue for re-drafting.')) return;
-      var f = document.createElement('form');
-      f.method = 'post';
-      f.action = btn.dataset.rejectUrl;
-      document.body.appendChild(f);
-      f.submit();
+      postForm(btn.dataset.rejectUrl);
     });
   });
 
@@ -476,11 +492,7 @@
   if (rejectAllBtn) {
     rejectAllBtn.addEventListener('click', function () {
       if (!confirm('Reject all pending drafts? Items stay in the queue for re-drafting.')) return;
-      var f = document.createElement('form');
-      f.method = 'post';
-      f.action = rejectAllBtn.dataset.url;
-      document.body.appendChild(f);
-      f.submit();
+      postForm(rejectAllBtn.dataset.url);
     });
   }
 })();

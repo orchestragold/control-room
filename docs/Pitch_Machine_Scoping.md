@@ -145,6 +145,51 @@ Other useful angles: social media bios/DMs as a fallback channel, conference spe
 - Whether `CoWork/Pitch Machine/` (the second Dropbox subfolder) actually exists yet needs verification before assuming its structure.
 - The plaintext Zoho credential in the existing scheduled task's prompt needs remediation as part of this build, not left as-is.
 
+## Session 14 (Aug 13, 2026) — The queue mechanism, resolving the multi-input architecture question
+
+Directly resolves the "open architecture question" left unanswered at the end of Session 13 (how Pitch Machine draws on multiple input sources beyond HubSpot). Triggered by Erich noticing the live `/draft-queue` was surfacing every HubSpot company rather than a properly curated, multi-source queue.
+
+**The core problem.** HubSpot alone isn't the full picture — a meaningful share of HubSpot contacts are warm (Maeve's lane, not cold-pitch candidates), and Erich has been informally telling Claude "put this in the queue" for WAA and Pacific Northwest items inside Cowork chats, with no structured place for those to land. The queue needs to unify multiple sources and sort everything by what's actually due soonest, not just dump raw HubSpot state.
+
+**Decisions, locked:**
+
+1. **Single shared queue, lives in Dropbox as a spreadsheet** (not a database table locked inside The Portal). Reasoning: it needs to be readable *and writable* from both Cowork chat sessions and The Portal app itself — Dropbox is the only thing both already touch today, via the Dropbox API sync mechanism already built for the knowledge base. Exact filename/location TBD at build time (likely a new sheet inside `CoWork/Pitch Machine/`, verify that folder actually exists first per the still-open item below).
+2. **Columns (draft, refine at build time):** item/target name, pitch type (Festival / WAA / Show Invite / PNW / future Distribution), source, deadline (required), status (queued / pitched / removed), notes/context, date added.
+3. **Adding items, from Cowork chat:** when Erich says "put this in the queue," whichever Claude session he's in must ask for a deadline if one isn't given, and **must refuse to add the item without one** — no queue entries with a missing deadline, enforced at add time, not left as a data-quality problem to clean up later.
+4. **Sort order across all sources:** the queue displayed inside The Portal ranks everything — HubSpot-sourced Festival items and queue-sheet items alike — by nearest deadline first, not grouped by source.
+5. **HubSpot inclusion rule, narrowed:** the queue should only pull HubSpot Festival companies that have an actual upcoming `reach_out_1` date set — not the full company list. This is a correctness fix against the already-locked legacy-data-protection and pre-research-check rules, which the live build apparently isn't respecting yet.
+6. **Lifecycle on pitch completion:** once The Portal marks something as pitched (any source), it gets removed from the queue sheet and a HubSpot record gets created or updated for it. **Confirmed: everything ends up in HubSpot eventually**, not just Festival items — this is a change from the original property-cap-driven assumption that non-festival types would stay out of HubSpot entirely.
+7. **HubSpot property cap is a blocker for #6 and needs a separate cleanup pass**, not solved here: Erich needs to audit HubSpot's 10/10 custom properties one by one, figure out what's actually unused, and free some up (or decide what to retire) before non-festival pitch types can get their own tracking fields. **Logged as an open action item for Erich, not yet scheduled.** Also flagged, longer-term: Erich raised the possibility of eventually building The Portal's own contact management system that syncs with or replaces HubSpot outright — not scoped, just captured so it isn't lost.
+
+**Resolved (Aug 13, 2026, continued):**
+
+8. **Queue sheet columns:** should be a superset — whatever fields Pitch Machine actually needs to draft/pitch something (pitch type, source, notes/context, status) *plus* the existing Festival Outreach spreadsheet's columns carried over directly, since many queue items will already have relevant deadline/context data sitting there. Not a from-scratch schema — extend the existing spreadsheet's structure rather than inventing a parallel one.
+9. **Deadline default for auto-pulled items:** when a queue item's deadline is being auto-populated from the Festival Outreach spreadsheet (rather than a human typing one in during a Cowork chat) and no deadline exists there either, default to **7 days out** rather than blocking the pull. This is distinct from decision #3 above (Cowork chat additions still must have a human-provided deadline, no silent defaulting there) — the default only applies to automated spreadsheet-sourced pulls where asking a human isn't possible in the moment.
+10. **Queue removal + HubSpot write are triggered together, atomically, by the "good to go" click** in the per-contact compose view (UI flow step 5) — not two separate steps. The moment Erich approves a Touch 1 send, The Portal removes the item from the queue sheet and writes/updates the HubSpot record in the same action, with whatever date got scheduled written into `reach_out_1`.
+
+**Still open / needs a build-time decision, not resolved here:**
+- Exact queue sheet filename and location within Dropbox (likely `CoWork/Pitch Machine/`, pending verification that folder exists).
+- Whether the "ask for a deadline, refuse without one" enforcement for Cowork-chat additions lives as a convention every Claude session follows, or gets built as an actual guardrail (a small tool/script that rejects missing-deadline writes) — the latter is more robust given how easy an informal convention is to forget mid-conversation.
+- **The "ideal schedule date" logic itself** — see below, newly surfaced, not previously scoped.
+
+### What determines the actual send date (not yet scoped)
+
+Erich flagged that the mechanism determining *when* a Touch 1 should actually be scheduled — as opposed to the deadline that governs queue ordering — hasn't been defined yet. The UI flow doc already references "schedules the send for the researched date" (step 5) but never specified what produces that date. This is a real gap, not a rehash of the deadline/queue-ordering decisions above.
+
+**Resolved (Aug 13, 2026, continued) — pulled from the other Pitch Machine thread's research, refined here:**
+
+11. **Base schedule logic:**
+    - **Touch 1 (Reach Out #1)** targets the 1st of the month, 8 months before the festival's own month.
+    - **Touch 2 (Reach Out #2)** targets the 1st of the month, 7 months before.
+    - **Submission deadline**, when tracked: the festival's actual posted deadline if findable, otherwise estimated at 6-7 months before the festival.
+12. **European blackout window, confirmed via research.** European vacation season is real and concentrated: France runs closures through all of August, Italy roughly mid-July through August (peaking hard around August 15th, Ferragosto, when the country empties out), Spain late July through August. **Rule: for contacts identified as European, any calculated send date (Touch 1 or Touch 2) that falls between July 15 and August 31 gets pushed to September 1.** Simpler than trying to model country-by-country variation, and errs toward not wasting a pitch on a buyer who's actually on a beach.
+13. **Day-of-week nudge, confirmed via research — refined from the original Tuesday/Thursday assumption.** The real data (HubSpot/Gong/Yesware-style studies) shows Tuesday as the single best day for cold-email reply rates, with Wednesday essentially tied for second, and Thursday a solid but slightly weaker third — not quite the Tuesday/Thursday pair originally assumed, though close enough that the instinct was right. **Rule: after computing a target date (including any European blackout push), if it doesn't fall on a Tuesday, shift to the nearest Tuesday; if that's not workable (e.g. conflicts with another scheduled send), fall back to Thursday.** Morning sends (8-10 AM recipient local time) also showed the strongest open rates in the research — worth building in as a time-of-day default once the app is actually setting send times, not just dates.
+
+14. **Buyer's-own-festival blackout, confirmed.** If the contact being pitched runs one or more festivals of their own (whether the one currently being targeted or others), avoid scheduling any send in the month immediately before any of those festival dates — they're heads-down running the event and won't meaningfully see a cold pitch. Applies per-contact, not just per-target-festival: a buyer running multiple events needs *each* of their festival dates checked, not just the one currently being pitched. **Data note, confirmed by Erich:** this data already exists — both HubSpot and the Festival Outreach spreadsheet track each festival's own date. No new field needed; the build just needs to query across all festival records associated with a given contact (not only the one being pitched) rather than treating festival-date as a single-record lookup. **Confirmed field name (queried live via HubSpot MCP, Aug 13 2026): `festival_date`** on the COMPANY object ("Festival date" — the date the festival happens). `submission_deadline` also exists as its own COMPANY property, confirming decision #11's submission-deadline lookup doesn't need a new field either.
+15. **Combined ordering of the date rules:** compute the base target (#11) → apply the European blackout push (#12) → apply the buyer's-own-festival blackout (#14) → apply the Tuesday/Thursday day-of-week nudge (#13) last, since the day-of-week shift should land on the final workable date, not get overridden by an earlier blackout check.
+
+Queue mechanism build (decisions #1-10 above) is not blocked by any of this — the full send-date algorithm (#11-15) is now specified enough to build directly, no placeholder needed.
+
 ## Session 13 (Aug 10, 2026) — Pitch Machine as a modular The Portal tool
 
 A voice-message brainstorm reframed Pitch Machine's place in The Portal's structure. Captured here before moving into the follow-up architecture discussion.

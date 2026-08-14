@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}The Portal{% endblock %}</title>
   {% block extra_styles %}{% endblock %}
   <style>
@@ -389,6 +390,7 @@
       <div class="sidebar-footer">
         {% if current_user.role == 'super_admin' %}
         <form method="POST" action="{{ url_for('main.set_mode') }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="mode" value="{{ 'test' if mode == 'live' else 'live' }}">
           <button type="submit" class="mode-badge {{ mode }}" title="Click to switch to {{ 'test' if mode == 'live' else 'live' }} mode">{{ mode }}</button>
         </form>

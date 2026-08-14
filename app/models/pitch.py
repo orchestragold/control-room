@@ -27,6 +27,7 @@ class PitchApproval(db.Model):
         nullable=False,
         default='pending',
     )
+    send_date     = db.Column(db.Date, nullable=True)   # computed at queue time; written to HubSpot on approve
     approved_by   = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
     approved_at   = db.Column(db.DateTime)
     sent_at       = db.Column(db.DateTime)
