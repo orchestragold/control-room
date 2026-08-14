@@ -540,15 +540,13 @@ def approve(pid: int):
 
     _remove_from_queue_sheet(approval.company_name)
 
-    if approval.pitch_type == 'Festival' and approval.hubspot_contact_id:
+    # Write reach_out_1 to HubSpot for any pitch type that has a known company ID.
+    # Queue-sheet items without a hubspot_contact_id are skipped silently.
+    hs_write_error = None
+    if approval.hubspot_contact_id:
         hs_write_error = _write_hubspot_reach_out_1(
             approval.hubspot_contact_id,
             send_date,
-        )
-    elif approval.pitch_type != 'Festival':
-        hs_write_error = (
-            f'HubSpot write blocked for {approval.pitch_type} — '
-            'free a custom property slot first (decision #7, Session 14).'
         )
 
     db.session.add(APITaskQueue(
