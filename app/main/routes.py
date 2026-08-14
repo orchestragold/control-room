@@ -1,7 +1,9 @@
 from datetime import datetime
 
-from flask import Blueprint, abort, redirect, render_template, url_for
+from flask import Blueprint, abort, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+
+from app.extensions import db
 
 main_bp = Blueprint('main', __name__)
 
@@ -72,3 +74,19 @@ def posting_tool():
         title='Posting Tool',
         description='Cross-project content publishing — coming in Session K.',
     )
+
+
+@main_bp.route('/set-mode', methods=['POST'])
+@login_required
+def set_mode():
+    if current_user.role != 'super_admin':
+        abort(403)
+    from app.models.queue import AppSetting
+    new_mode = 'live' if request.form.get('mode') == 'live' else 'test'
+    setting = AppSetting.query.get('mode')
+    if setting:
+        setting.value = new_mode
+    else:
+        db.session.add(AppSetting(key_name='mode', value=new_mode))
+    db.session.commit()
+    return redirect(request.referrer or url_for('main.dashboard'))

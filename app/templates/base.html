@@ -158,6 +158,8 @@
     }
     .mode-badge.test { background: #1c0a0a; color: #f87171; }
     .mode-badge.live { background: #052e16; color: #4ade80; }
+    button.mode-badge { border: none; cursor: pointer; font-family: inherit; }
+    button.mode-badge:hover { opacity: 0.75; }
 
     .user-name {
       font-size: 11px;
@@ -385,7 +387,14 @@
       </nav>
 
       <div class="sidebar-footer">
+        {% if current_user.role == 'super_admin' %}
+        <form method="POST" action="{{ url_for('main.set_mode') }}" style="display:inline;">
+          <input type="hidden" name="mode" value="{{ 'test' if mode == 'live' else 'live' }}">
+          <button type="submit" class="mode-badge {{ mode }}" title="Click to switch to {{ 'test' if mode == 'live' else 'live' }} mode">{{ mode }}</button>
+        </form>
+        {% else %}
         <span class="mode-badge {{ mode }}">{{ mode }}</span>
+        {% endif %}
         <span class="user-name">{{ current_user.name or current_user.email }}</span>
         <a href="{{ url_for('auth.logout') }}" class="logout-link">Sign out</a>
       </div>
