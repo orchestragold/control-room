@@ -36,7 +36,16 @@ LINKS: The pitch archive contains hyperlinks as HTML <a href="URL">text</a> tags
 When you include links in the Pitch Draft body (e.g. the ✱ ∞ ⊙ link-bullet section), \
 reproduce them using the same <a href="URL">display text</a> format so the links \
 remain clickable in the editor. Never strip the href — copy the actual URL from the \
-archive example.\
+archive example.
+
+STYLE: Never use em dashes (—) anywhere in the pitch body or subject line. \
+Use a hyphen (-), restructure the sentence, or use a comma instead. \
+This is a hard house-style rule.
+
+OUTPUT FORMAT: The Pitch Draft section must contain ONLY the email body — no flagging \
+notes, caveats, or meta-commentary. If you need to flag something for Erich's attention \
+(a factual uncertainty, a date to verify, etc.), put it in the Research Brief section, \
+not in the Pitch Draft body.\
 """
 
 # Per-pitch-type user prompt templates.
@@ -283,18 +292,18 @@ def _parse_response(text: str) -> tuple[str, str, str]:
     else:
         body = draft_part.strip()
 
-    # Strip any "Drafting notes" section Claude appends after the body, move to research panel
-    drafting_split = re.split(
-        r'\n[-—]{3,}\n+\*{0,2}Drafting notes?:\*{0,2}',
-        body,
-        maxsplit=1,
-        flags=re.IGNORECASE,
-    )
+    # Strip anything Claude appends after a --- divider in the body (flags, caveats, meta-notes).
+    # Claude uses many phrasings ("Drafting notes:", "Flagging one item...", etc.) — catch all of them
+    # by splitting on any --- separator and moving the tail to the research panel.
+    drafting_split = re.split(r'\n[-—]{3,}\n', body, maxsplit=1)
     if len(drafting_split) == 2:
         body = drafting_split[0].strip()
         drafting_notes = drafting_split[1].strip()
         if drafting_notes:
             sep = '\n\n---\n\n' if research_notes else ''
-            research_notes = (research_notes + sep + '**Drafting notes:**\n' + drafting_notes).strip()
+            research_notes = (research_notes + sep + '**Notes:**\n' + drafting_notes).strip()
+
+    # Hard safety net: replace any em dashes that slipped through (en dashes are fine for ranges)
+    body = body.replace('—', '-')
 
     return research_notes, subject, body
