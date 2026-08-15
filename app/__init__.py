@@ -90,6 +90,10 @@ def create_app(config_class=Config):
             db.session.commit()
 
             payload = task.payload or {}
+
+            # ── C2: narrow except to send_email() only ───────────────────────────
+            # Exceptions in the success block (post-send) must NOT trigger a retry,
+            # since the email was already delivered.
             try:
                 send_email(
                     to_address = payload['to_email_actual'],
@@ -97,39 +101,6 @@ def create_app(config_class=Config):
                     body_html  = payload['body'],
                     cc_address = payload.get('cc_email') or None,
                 )
-                task.status       = 'completed'
-                task.completed_at = datetime.utcnow()
-
-                approval = PitchApproval.query.get(payload.get('pitch_approval_id'))
-                if approval:
-                    approval.status  = 'sent'
-                    approval.sent_at = datetime.utcnow()
-
-                    # Write ATTEMPTED_TO_CONTACT back to HubSpot so the board moves the card
-                    if approval.hubspot_contact_id:
-                        try:
-                            from app.integrations.hubspot import HubSpotClient, HubSpotError
-                            from app.models.hubspot_cache import HubSpotCompany
-                            updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
-                            if approval.send_date:
-                                updates['reach_out_1'] = approval.send_date.isoformat()
-                            HubSpotClient().update_company(approval.hubspot_contact_id, updates)
-                            company = HubSpotCompany.query.filter_by(
-                                hubspot_id=approval.hubspot_contact_id
-                            ).first()
-                            if company:
-                                company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
-                                if approval.send_date and not company.reach_out_1:
-                                    company.reach_out_1 = approval.send_date
-                        except Exception as hs_e:
-                            print(f'  HubSpot write failed for {approval.company_name}: {hs_e}')
-
-                sent += 1
-                recipient = payload.get('to_email_actual', '?')
-                intended  = payload.get('to_email_intended', '')
-                redirect_note = f' (redirected from {intended})' if payload.get('was_redirected') else ''
-                print(f'  Sent → {recipient}{redirect_note}')
-
             except Exception as e:
                 task.retry_count  += 1
                 task.error_message = str(e)
@@ -138,8 +109,47 @@ def create_app(config_class=Config):
                 )
                 failed += 1
                 print(f'  Failed: {e}')
+                db.session.commit()
+                continue
 
+            # ── C1: commit task=completed before touching approval/HubSpot ───────
+            # If anything below fails, the task is already durably completed and
+            # won't be re-sent on the next cron tick.
+            task.status       = 'completed'
+            task.completed_at = datetime.utcnow()
             db.session.commit()
+
+            # ── Update approval and HubSpot (best-effort; send already recorded) ──
+            approval = PitchApproval.query.get(payload.get('pitch_approval_id'))
+            if approval:
+                approval.status  = 'sent'
+                approval.sent_at = datetime.utcnow()
+
+                if approval.hubspot_contact_id:
+                    try:
+                        from app.integrations.hubspot import HubSpotClient, HubSpotError
+                        from app.models.hubspot_cache import HubSpotCompany
+                        updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
+                        if approval.send_date:
+                            updates['reach_out_1'] = approval.send_date.isoformat()
+                        HubSpotClient().update_company(approval.hubspot_contact_id, updates)
+                        company = HubSpotCompany.query.filter_by(
+                            hubspot_id=approval.hubspot_contact_id
+                        ).first()
+                        if company:
+                            company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
+                            if approval.send_date and not company.reach_out_1:
+                                company.reach_out_1 = approval.send_date
+                    except Exception as hs_e:
+                        print(f'  HubSpot write failed for {approval.company_name}: {hs_e}')
+
+            sent += 1
+            recipient     = payload.get('to_email_actual', '?')
+            intended      = payload.get('to_email_intended', '')
+            redirect_note = f' (redirected from {intended})' if payload.get('was_redirected') else ''
+            print(f'  Sent → {recipient}{redirect_note}')
+
+            db.session.commit()  # approval.status='sent' + cache updates
 
         print(f'Done — {sent} sent, {failed} failed.')
 

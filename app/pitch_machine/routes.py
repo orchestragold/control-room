@@ -357,12 +357,14 @@ def draft_queue():
     except DropboxError:
         knowledge_ready = False
 
+    from app.pitch_machine.pitch_types import PITCH_TYPES
     return render_template(
         'pitch_machine/draft_queue.html',
         entries=entries,
         existing_pending=existing_pending,
         knowledge_ready=knowledge_ready,
         batch_limit=_GENERATE_BATCH_LIMIT,
+        pitch_types=PITCH_TYPES,
     )
 
 
@@ -415,6 +417,8 @@ def generate():
     errors: list[str] = []
     created = 0
 
+    from app.pitch_machine.pitch_types import PITCH_TYPE_SET
+
     for entry_id in entry_ids:
         if entry_id.startswith('hs:'):
             # ── HubSpot company ──────────────────────────────────────────────────
@@ -430,8 +434,13 @@ def generate():
                 errors.append(f'{company.name}: pending draft already exists — skipped')
                 continue
 
+            # C4: read pitch type from form field; default to Festival
+            pitch_type = request.form.get(f'pt_hs_{hs_id}', 'Festival')
+            if pitch_type not in PITCH_TYPE_SET:
+                pitch_type = 'Festival'
+
             try:
-                draft = _get_generator('Festival').generate(
+                draft = _get_generator(pitch_type).generate(
                     name=company.name,
                     website=company.website,
                     description=company.description,
@@ -443,10 +452,10 @@ def generate():
             db.session.add(PitchApproval(
                 hubspot_contact_id = hs_id,
                 company_name       = company.name,
-                pitch_type         = 'Festival',
+                pitch_type         = pitch_type,
                 touch_number       = 1,
                 draft_subject      = draft.subject,
-                draft_body         = draft.body,
+                draft_body         = sanitize_body_html(draft.body),  # O2
                 research_notes     = draft.research_notes,
                 to_email           = _extract_email(draft.research_notes),
                 cc_email           = _DEFAULT_CC,
@@ -486,7 +495,7 @@ def generate():
                 pitch_type         = item.pitch_type,
                 touch_number       = 1,
                 draft_subject      = draft.subject,
-                draft_body         = draft.body,
+                draft_body         = sanitize_body_html(draft.body),  # O2
                 research_notes     = draft.research_notes,
                 to_email           = _extract_email(item.notes, draft.research_notes),
                 cc_email           = _DEFAULT_CC,
@@ -584,18 +593,6 @@ def approve(pid: int):
         },
     ))
 
-    # ── Atomic action ────────────────────────────────────────────────────────────
-    # 1. Remove from queue sheet (best-effort; logged to stderr on failure)
-    # 2. Write reach_out_1 to HubSpot for any pitch with a known company ID
-    _remove_from_queue_sheet(approval.company_name)
-
-    hs_write_error = None
-    if approval.hubspot_contact_id:
-        hs_write_error = _write_hubspot_reach_out_1(
-            approval.hubspot_contact_id,
-            send_date,
-        )
-
     db.session.add(APITaskQueue(
         platform  = 'zoho_mail',
         task_type = 'send_pitch_touch1',
@@ -612,7 +609,19 @@ def approve(pid: int):
         created_by = current_user.id,
     ))
 
+    # ── C3: commit approval + task row BEFORE external side effects ───────────────
+    # External writes (Dropbox, HubSpot) happen after the local state is durable.
+    # If they fail, the task row already exists and process-queue will still send.
     db.session.commit()
+
+    _remove_from_queue_sheet(approval.company_name)
+
+    hs_write_error = None
+    if approval.hubspot_contact_id:
+        hs_write_error = _write_hubspot_reach_out_1(
+            approval.hubspot_contact_id,
+            send_date,
+        )
 
     if hs_write_error:
         flash(f'Approved — but note: {hs_write_error}', 'error')

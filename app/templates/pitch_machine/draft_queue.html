@@ -97,6 +97,12 @@
     font-size: 11px; color: #5aaa7a; background: #0a1a10;
     border: 1px solid #1a3020; border-radius: 2px; padding: 2px 7px; white-space: nowrap;
   }
+  .type-select {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 4px; border-radius: 2px; background: #0a1a10; border: 1px solid #1a3020;
+    color: #5aaa7a; cursor: pointer; appearance: none;
+  }
+  .type-select:focus { outline: 1px solid #3a6a3a; }
 
   .dq-footer {
     display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
@@ -236,10 +242,21 @@
       </div>
 
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+        {% if entry.source == 'hubspot' and not has_draft %}
+        {# HubSpot items: editable select so non-Festival types can be chosen before generating #}
+        <select name="pt_hs_{{ entry.hubspot_id }}"
+                class="type-select"
+                onclick="event.stopPropagation()">
+          {% for pt in pitch_types %}
+          <option value="{{ pt }}" {% if pt == entry.pitch_type %}selected{% endif %}>{{ pt }}</option>
+          {% endfor %}
+        </select>
+        {% else %}
         {% set pt = entry.pitch_type %}
         <span class="type-badge {% if pt == 'Festival' %}type-festival{% elif pt == 'WAA' %}type-waa{% elif pt == 'Show Invite' %}type-show-invite{% elif pt == 'PNW' %}type-pnw{% else %}type-other{% endif %}">
           {{ pt }}
         </span>
+        {% endif %}
         {% if has_draft %}<span class="draft-badge">draft pending</span>{% endif %}
       </div>
     </label>
