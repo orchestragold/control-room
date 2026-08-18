@@ -153,37 +153,58 @@ def list_sent_messages(days_back: int = 90) -> list[dict]:
     if not sent_folder_id:
         raise ZohoError('Could not find Sent folder in Zoho account')
 
-    resp = requests.get(
-        f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
-        headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
-        params={'folderId': sent_folder_id, 'limit': 1000},
-        timeout=30,
-    )
-    resp.raise_for_status()
+    # Paginate until we get all messages within the window or the API returns fewer
+    # than a full page (signalling end of folder). Zoho returns newest-first, so
+    # we stop early once we hit a message older than the cutoff.
+    PAGE_SIZE = 200
+    messages  = []
+    start     = 0
+    seen_ids  = set()
 
-    messages = []
-    for msg in resp.json().get('data', []):
-        ts = msg.get('sentDateInGMT') or msg.get('receivedTime') or '0'
-        if int(ts) < cutoff_ms:
-            continue  # outside the window
+    while True:
+        resp = requests.get(
+            f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
+            headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
+            params={'folderId': sent_folder_id, 'limit': PAGE_SIZE, 'start': start},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        page = resp.json().get('data', [])
+        if not page:
+            break
 
-        # Parse first email address from To: field ("Name <email>" or bare "email")
-        to_raw = msg.get('toAddress', '')
-        m = email_pat.search(to_raw)
-        to_email = m.group(0).lower() if m else to_raw.lower().strip()
+        hit_cutoff = False
+        for msg in page:
+            ts  = msg.get('sentDateInGMT') or msg.get('receivedTime') or '0'
+            mid = str(msg.get('messageId', ''))
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
 
-        sent_at = None
-        try:
-            sent_at = datetime.utcfromtimestamp(int(ts) / 1000)
-        except Exception:
-            pass
+            if int(ts) < cutoff_ms:
+                hit_cutoff = True
+                break
 
-        messages.append({
-            'to_address': to_email,
-            'subject':    msg.get('subject', ''),
-            'sent_at':    sent_at,
-            'message_id': str(msg.get('messageId', '')),
-        })
+            to_raw   = msg.get('toAddress', '')
+            m        = email_pat.search(to_raw)
+            to_email = m.group(0).lower() if m else to_raw.lower().strip()
+
+            sent_at = None
+            try:
+                sent_at = datetime.utcfromtimestamp(int(ts) / 1000)
+            except Exception:
+                pass
+
+            messages.append({
+                'to_address': to_email,
+                'subject':    msg.get('subject', ''),
+                'sent_at':    sent_at,
+                'message_id': mid,
+            })
+
+        if hit_cutoff or len(page) < PAGE_SIZE:
+            break
+        start += PAGE_SIZE
 
     return messages
 
