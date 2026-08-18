@@ -220,14 +220,85 @@ def create_app(config_class=Config):
 
         print(f'\n{matched} matched and updated.')
 
+        # ── Phase 2: reconcile unmatched against HubSpot cache via subject line ──
+        # Pitches sent outside the portal (Gmail Schedule Send, etc.) have no
+        # PitchApproval record. Try to match them to HubSpot companies by extracting
+        # the company name from the subject line and fuzzy-matching against the cache.
+        hs_reconciled = 0
+        still_unmatched = []
+
         if unmatched:
-            print(f'\n{len(unmatched)} sent messages with no portal record '
-                  f'(pitched outside portal — drag manually on board):')
-            for msg in unmatched[:25]:
-                subj = msg["subject"][:60]
-                print(f'  → {msg["to_address"]}: {subj}')
-            if len(unmatched) > 25:
-                print(f'  ... and {len(unmatched) - 25} more')
+            import re as _re
+            # Patterns that appear in Orchestra Gold pitch subject lines
+            _SUBJECT_PATTERNS = [
+                # "Orchestra GOLD ✱ Festival Name 2027"  (most common)
+                _re.compile(r'Orchestra\s+GOLD\s+[✱✱*]\s+(.+?)\s+\d{4}', _re.IGNORECASE),
+                # "Orchestra GOLD — Festival Name 2027"
+                _re.compile(r'Orchestra\s+GOLD\s+[-–—]\s+(.+?)\s+\d{4}', _re.IGNORECASE),
+                # "Orchestra GOLD | Festival Name"  (fallback: no year)
+                _re.compile(r'Orchestra\s+GOLD\s+[|]\s+(.+)', _re.IGNORECASE),
+            ]
+
+            all_companies = HubSpotCompany.query.filter_by(is_duplicate=False).all()
+
+            def _extract_name(subject):
+                for pat in _SUBJECT_PATTERNS:
+                    m = pat.search(subject)
+                    if m:
+                        return m.group(1).strip()
+                return None
+
+            def _find_company(extracted):
+                name_lower = extracted.lower()
+                exact = [c for c in all_companies
+                         if c.name.lower() == name_lower]
+                if exact:
+                    return exact[0]
+                # substring match — only if exactly one company matches
+                subs = [c for c in all_companies
+                        if name_lower in c.name.lower() or c.name.lower() in name_lower]
+                return subs[0] if len(subs) == 1 else None
+
+            for msg in unmatched:
+                subject   = msg['subject']
+                extracted = _extract_name(subject)
+                company   = _find_company(extracted) if extracted else None
+
+                if company is None:
+                    still_unmatched.append(msg)
+                    continue
+
+                if company.hs_lead_status == 'ATTEMPTED_TO_CONTACT':
+                    print(f'  Already SENT in cache: {company.name} (skipped)')
+                    continue
+
+                try:
+                    sent_at = msg['sent_at']
+                    updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
+                    if sent_at and not company.reach_out_1:
+                        updates['reach_out_1'] = sent_at.strftime('%Y-%m-%d')
+                    HubSpotClient().update_company(company.hubspot_id, updates)
+                    company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
+                    if sent_at and not company.reach_out_1:
+                        from datetime import date as _date
+                        company.reach_out_1 = sent_at.date()
+                    db.session.commit()
+                    hs_reconciled += 1
+                    print(f'  Auto-reconciled: {company.name} ← "{subject[:55]}"')
+                except HubSpotError as e:
+                    print(f'  HubSpot write failed for {company.name}: {e}')
+                    still_unmatched.append(msg)
+
+        if hs_reconciled:
+            print(f'\n{hs_reconciled} auto-reconciled from subject line match.')
+
+        if still_unmatched:
+            print(f'\n{len(still_unmatched)} sent messages with no match '
+                  f'(drag manually to SENT on the board):')
+            for msg in still_unmatched[:25]:
+                print(f'  → {msg["to_address"]}: {msg["subject"][:60]}')
+            if len(still_unmatched) > 25:
+                print(f'  ... and {len(still_unmatched) - 25} more')
 
     @app.cli.command('seed-pitch-types')
     def seed_pitch_types_command():
