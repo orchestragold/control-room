@@ -273,12 +273,18 @@ def create_app(config_class=Config):
                 print(f'  ? {company.name}  ←  "{msg["subject"][:65]}"')
 
         if still_unmatched:
-            print(f'\n{len(still_unmatched)} unmatched — no confident subject-line match '
-                  f'(review and drag to SENT manually if pitched):')
+            import os as _os
+            report_path = _os.path.expanduser('~/scan_sent_unmatched.txt')
+            with open(report_path, 'w') as _f:
+                _f.write(f'scan-sent unmatched — {len(still_unmatched)} messages\n\n')
+                for msg in still_unmatched:
+                    _f.write(f'{msg["to_address"]}\t{msg["subject"]}\t{msg.get("sent_at","")}\n')
+            print(f'\n{len(still_unmatched)} unmatched written to: {report_path}')
+            print('First 50:')
             for msg in still_unmatched[:50]:
                 print(f'  → {msg["to_address"]}: {msg["subject"][:65]}')
             if len(still_unmatched) > 50:
-                print(f'  ... and {len(still_unmatched) - 50} more')
+                print(f'  ... (see {report_path} for all)')
 
         # ── Phase 3: fix portal pitches where send succeeded but HubSpot write failed ──
         # PitchApproval.status='sent' means process-queue delivered the email.
