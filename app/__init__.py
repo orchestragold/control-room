@@ -300,6 +300,39 @@ def create_app(config_class=Config):
             if len(still_unmatched) > 25:
                 print(f'  ... and {len(still_unmatched) - 25} more')
 
+        # ── Phase 3: fix portal pitches where send succeeded but HubSpot write failed ──
+        # PitchApproval.status='sent' means process-queue delivered the email.
+        # If the subsequent HubSpot write failed, the board still shows QUEUED.
+        # Find those and write ATTEMPTED_TO_CONTACT now.
+        hs_fixed = 0
+        sent_approvals = PitchApproval.query.filter_by(status='sent').all()
+        for appr in sent_approvals:
+            if not appr.hubspot_contact_id:
+                continue
+            company = HubSpotCompany.query.filter_by(
+                hubspot_id=appr.hubspot_contact_id
+            ).first()
+            if not company or company.hs_lead_status == 'ATTEMPTED_TO_CONTACT':
+                continue
+            try:
+                updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
+                if appr.send_date and not company.reach_out_1:
+                    updates['reach_out_1'] = appr.send_date.isoformat()
+                HubSpotClient().update_company(appr.hubspot_contact_id, updates)
+                company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
+                if appr.send_date and not company.reach_out_1:
+                    company.reach_out_1 = appr.send_date
+                db.session.commit()
+                hs_fixed += 1
+                print(f'  Phase 3 fixed: {appr.company_name} (approval #{appr.id})')
+            except HubSpotError as e:
+                print(f'  Phase 3 HubSpot write failed for {appr.company_name}: {e}')
+
+        if hs_fixed:
+            print(f'\n{hs_fixed} portal pitch(es) reconciled (HubSpot write had previously failed).')
+        elif sent_approvals:
+            print(f'\nPhase 3: all {len(sent_approvals)} sent portal approvals already reconciled.')
+
     @app.cli.command('seed-pitch-types')
     def seed_pitch_types_command():
         """Seed or reset pitch_type_configs to the built-in defaults. Skips existing rows."""
