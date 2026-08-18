@@ -35,9 +35,14 @@ ARCHIVE_PATHS: dict[str, str] = {
 }
 
 def knowledge_paths() -> list[str]:
-    """All paths that need to be in the DB cache (rules + every archive).
-    Defined as a function so item 2's DB-driven config can swap the body without
-    changing any call sites in sync_knowledge_to_cache / get_knowledge_content."""
+    """All paths that need to be in the DB cache (rules + every archive). DB-driven."""
+    try:
+        from app.models.pitch_config import PitchTypeConfig
+        configs = PitchTypeConfig.query.filter_by(active=True).all()
+        if configs:
+            return [RULES_PATH] + sorted({c.archive_dropbox_path for c in configs})
+    except Exception:
+        pass
     return [RULES_PATH] + sorted(set(ARCHIVE_PATHS.values()))
 
 _TOKEN_URL   = 'https://api.dropbox.com/oauth2/token'
@@ -220,14 +225,22 @@ def get_knowledge_content() -> dict[str, str]:
 def get_knowledge_for_pitch_type(pitch_type: str) -> tuple[str, str]:
     """
     Return (rules_content, archive_content) for a given pitch type.
-    Falls back to the Festival archive for unknown types.
+    Archive path is looked up from pitch_type_configs; falls back to ARCHIVE_PATHS dict.
     Raises DropboxError if the required files haven't been synced.
     """
     from app.models.knowledge import DropboxSync
 
+    # Resolve archive path from DB; fall back to hardcoded dict if DB unavailable
     archive_path = ARCHIVE_PATHS.get(pitch_type, ARCHIVE_PATHS['Festival'])
-    needed = [RULES_PATH, archive_path]
+    try:
+        from app.models.pitch_config import PitchTypeConfig
+        config = PitchTypeConfig.query.filter_by(name=pitch_type, active=True).first()
+        if config:
+            archive_path = config.archive_dropbox_path
+    except Exception:
+        pass
 
+    needed = [RULES_PATH, archive_path]
     records = {r.path: r.content for r in DropboxSync.query.filter(
         DropboxSync.path.in_(needed)
     ).all() if r.content}

@@ -1,13 +1,8 @@
 """
-Tests for the generate() route — covers the O1 gap from the code review.
+Tests for the generate() route — covers the O1 dedup fix.
 
-O1: generate() deduplication only checks status='pending'. An 'approved'
-or 'sent' approval for the same company does NOT block a second draft
-from being created — which could eventually lead to double-sending.
-
-This test is EXPECTED TO FAIL until O1 is fixed, since it documents a
-known gap that rides with Session G. A failure here is informational,
-not a regression.
+O1 (fixed in session 2): generate() now checks status IN ('pending','approved','sent'),
+blocking a second draft for any company that already has an active approval.
 """
 import pytest
 from unittest.mock import patch, MagicMock
@@ -84,18 +79,8 @@ class TestO1GenerateDedup:
             count = PitchApproval.query.filter_by(hubspot_contact_id=hs_id).count()
             assert count == 1, f"Expected 1 approval (blocked), got {count}"
 
-    @pytest.mark.xfail(
-        reason="O1 not yet fixed — generate() only checks status='pending', not 'approved'/'sent'. "
-               "This test documents the gap; it will be fixed in Session G.",
-        strict=True,
-    )
     def test_approved_approval_blocks_new_draft(self, app, db, client):
-        """
-        O1 gap: status='approved' should block a new draft but currently DOES NOT.
-        Marked xfail — this test is expected to fail until O1 is implemented.
-        A company with an 'approved' (queued-to-send) approval can be drafted again,
-        creating two approvals that could result in two sends to the same person.
-        """
+        """O1 fixed: status='approved' blocks a new draft (no duplicate task queued)."""
         from app.models.pitch import PitchApproval
 
         hs_id = _seed_hubspot_company(app, db)
@@ -128,15 +113,8 @@ class TestO1GenerateDedup:
                 "Fix: extend the dedup check to include status='approved' and status='sent'."
             )
 
-    @pytest.mark.xfail(
-        reason="O1 not yet fixed — same gap as approved, just the 'sent' variant.",
-        strict=True,
-    )
     def test_sent_approval_blocks_new_draft(self, app, db, client):
-        """
-        O1 gap: status='sent' should also block a new draft but currently does not.
-        A company that's already been pitched can be re-drafted and re-sent.
-        """
+        """O1 fixed: status='sent' blocks a new draft."""
         from app.models.pitch import PitchApproval
 
         hs_id = _seed_hubspot_company(app, db)

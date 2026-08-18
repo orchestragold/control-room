@@ -183,8 +183,6 @@ Body:
 [full pitch body]\
 """
 
-from app.pitch_machine.pitch_types import PITCH_TYPE_SET  # noqa: E402
-
 _TEMPLATES = {
     'Festival':         _FESTIVAL_TEMPLATE,
     'WAA':              _WAA_TEMPLATE,
@@ -229,15 +227,29 @@ class DraftGenerator:
         if not api_key:
             raise DraftGenerationError('ANTHROPIC_API_KEY is not configured')
 
+        # Validate pitch type and load template from DB; fall back to hardcoded dict
+        template = None
+        try:
+            from app.models.pitch_config import PitchTypeConfig
+            config = PitchTypeConfig.query.filter_by(name=pitch_type, active=True).first()
+            if config is None:
+                raise DraftGenerationError(f'Unknown pitch type: {pitch_type!r}')
+            template = config.prompt_template
+        except DraftGenerationError:
+            raise
+        except Exception:
+            # DB unavailable (first boot, test env) — fall back to hardcoded dict
+            if pitch_type not in _TEMPLATES:
+                raise DraftGenerationError(f'Unknown pitch type: {pitch_type!r}')
+            template = _TEMPLATES[pitch_type]
+
         try:
             rules_content, archive_content = get_knowledge_for_pitch_type(pitch_type)
         except DropboxError as e:
             raise DraftGenerationError(str(e))
 
-        if pitch_type not in PITCH_TYPE_SET:
-            raise DraftGenerationError(f'Unknown pitch type: {pitch_type!r}')
         self._pitch_type = pitch_type
-        self._template   = _TEMPLATES.get(pitch_type, _DEFAULT_TEMPLATE)
+        self._template   = template
         self._client     = self._anthropic.Anthropic(api_key=api_key)
 
         # System prompt: house style rules cached first, then archive cached on top.

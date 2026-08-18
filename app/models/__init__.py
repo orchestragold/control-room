@@ -4,6 +4,7 @@ from .queue import AppSetting, APIRateTracking, APITaskQueue, ApprovalLog
 from .pitch import PitchApproval
 from .knowledge import WarmContact, DropboxSync
 from .hubspot_cache import HubSpotCompany
+from .pitch_config import PitchTypeConfig
 
 __all__ = [
     'User',
@@ -20,4 +21,5 @@ __all__ = [
     'WarmContact',
     'DropboxSync',
     'HubSpotCompany',
+    'PitchTypeConfig',
 ]

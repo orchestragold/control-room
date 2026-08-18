@@ -244,7 +244,8 @@
         </select>
         {% else %}
         {% set pt = entry.pitch_type %}
-        <span class="type-badge {% if pt == 'Festival' %}type-festival{% elif pt == 'WAA' %}type-waa{% elif pt == 'Show Invite' %}type-show-invite{% elif pt == 'PNW' %}type-pnw{% elif pt == 'PNW Tour - Media' %}type-pnw-media{% else %}type-other{% endif %}">
+        {% set color = type_colors.get(pt, '#888888') %}
+        <span class="type-badge" style="color:{{ color }};background:color-mix(in srgb,{{ color }} 12%,#000);border:1px solid color-mix(in srgb,{{ color }} 30%,#000);">
           {{ pt }}
         </span>
         {% endif %}

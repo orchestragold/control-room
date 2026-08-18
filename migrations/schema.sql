@@ -208,6 +208,23 @@ CREATE TABLE IF NOT EXISTS api_task_queue (
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── Item 2 migration: pitch type configuration ──────────────────────────────
+-- db.create_all() on startup creates this automatically on fresh installs.
+-- Run manually on production if upgrading an existing install before deploying item 2 code.
+CREATE TABLE IF NOT EXISTS pitch_type_configs (
+    id                   INT UNSIGNED  AUTO_INCREMENT PRIMARY KEY,
+    name                 VARCHAR(100)  NOT NULL,
+    archive_dropbox_path VARCHAR(255)  NOT NULL,
+    prompt_template      MEDIUMTEXT    NOT NULL,
+    badge_color          VARCHAR(7)    NOT NULL DEFAULT '#888888',
+    active               TINYINT(1)   NOT NULL DEFAULT 1,
+    sort_order           INT           NOT NULL DEFAULT 0,
+    created_at           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_ptc_name (name),
+    KEY idx_ptc_active_sort (active, sort_order)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Session E migration: pitch_type column on pitch_approvals ───────────────
 -- ALTER TABLE pitch_approvals
 --   ADD COLUMN IF NOT EXISTS pitch_type VARCHAR(50) NOT NULL DEFAULT 'Festival'

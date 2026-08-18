@@ -295,7 +295,8 @@
     <div class="draft-company">{{ draft.company_name or 'Unknown' }}</div>
     <div class="header-right">
       {% set pt = draft.pitch_type or 'Festival' %}
-      <span class="type-chip type-{{ pt | replace(' ', '-') }}">{{ pt }}</span>
+      {% set color = type_colors.get(pt, '#888888') %}
+      <span class="type-chip" style="color:{{ color }};background:color-mix(in srgb,{{ color }} 12%,#000);border:1px solid color-mix(in srgb,{{ color }} 30%,#000);">{{ pt }}</span>
       <span class="touch-label">Touch {{ draft.touch_number }}</span>
     </div>
   </div>

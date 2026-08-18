@@ -357,14 +357,15 @@ def draft_queue():
     except DropboxError:
         knowledge_ready = False
 
-    from app.pitch_machine.pitch_types import PITCH_TYPES
+    from app.pitch_machine.pitch_types import get_pitch_types
     return render_template(
         'pitch_machine/draft_queue.html',
         entries=entries,
         existing_pending=existing_pending,
         knowledge_ready=knowledge_ready,
         batch_limit=_GENERATE_BATCH_LIMIT,
-        pitch_types=PITCH_TYPES,
+        pitch_types=get_pitch_types(),
+        type_colors=_get_type_colors(),
         pending_gen=_pending_gen_count(),
     )
 
@@ -407,7 +408,8 @@ def generate():
 
     from app.integrations.dropbox_sync import get_or_create_queue_csv
     from app.integrations.pitch_queue import parse_queue
-    from app.pitch_machine.pitch_types import PITCH_TYPE_SET
+    from app.pitch_machine.pitch_types import get_pitch_type_set
+    PITCH_TYPE_SET = get_pitch_type_set()
 
     try:
         queue_items = {item.name: item for item in parse_queue(get_or_create_queue_csv())}
@@ -430,11 +432,12 @@ def generate():
             if company is None or company.is_duplicate:
                 continue
 
-            existing = PitchApproval.query.filter_by(
-                hubspot_contact_id=hs_id, status='pending'
+            existing = PitchApproval.query.filter(
+                PitchApproval.hubspot_contact_id == hs_id,
+                PitchApproval.status.in_(['pending', 'approved', 'sent']),
             ).first()
             if existing:
-                flash(f'{company.name}: pending draft already exists — skipped', 'error')
+                flash(f'{company.name}: already drafted or sent — skipped', 'error')
                 continue
 
             pitch_type = request.form.get(f'pt_hs_{hs_id}', 'Festival')
@@ -464,11 +467,12 @@ def generate():
                 flash(f'{item_name!r}: not found in queue sheet — skipped', 'error')
                 continue
 
-            existing = PitchApproval.query.filter_by(
-                company_name=item_name, status='pending'
+            existing = PitchApproval.query.filter(
+                PitchApproval.company_name == item_name,
+                PitchApproval.status.in_(['pending', 'approved', 'sent']),
             ).first()
             if existing:
-                flash(f'{item_name}: pending draft already exists — skipped', 'error')
+                flash(f'{item_name}: already drafted or sent — skipped', 'error')
                 continue
 
             db.session.add(APITaskQueue(
@@ -604,6 +608,7 @@ def review():
         drafts=pending,
         test_mode=is_test_mode(),
         redirect_email=_get_redirect_email_display(),
+        type_colors=_get_type_colors(),
     )
 
 
@@ -753,6 +758,15 @@ def reject(pid: int):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────
+
+def _get_type_colors() -> dict:
+    """Return {name: badge_color} for all pitch types. Empty dict if DB unavailable."""
+    try:
+        from app.models.pitch_config import PitchTypeConfig
+        return {c.name: c.badge_color for c in PitchTypeConfig.query.all()}
+    except Exception:
+        return {}
+
 
 def _pending_gen_count() -> int:
     return APITaskQueue.query.filter_by(

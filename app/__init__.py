@@ -229,6 +229,22 @@ def create_app(config_class=Config):
             if len(unmatched) > 25:
                 print(f'  ... and {len(unmatched) - 25} more')
 
+    @app.cli.command('seed-pitch-types')
+    def seed_pitch_types_command():
+        """Seed or reset pitch_type_configs to the built-in defaults. Skips existing rows."""
+        from app.models.pitch_config import PitchTypeConfig
+        from app.pitch_machine.default_pitch_types import DEFAULT_PITCH_TYPES
+        added = 0
+        for data in DEFAULT_PITCH_TYPES:
+            if PitchTypeConfig.query.filter_by(name=data['name']).first() is None:
+                db.session.add(PitchTypeConfig(**data))
+                added += 1
+                print(f'  Added: {data["name"]}')
+            else:
+                print(f'  Skipped (exists): {data["name"]}')
+        db.session.commit()
+        print(f'Done — {added} added.')
+
     @app.cli.command('generate-drafts')
     def generate_drafts_command():
         """Process pending pitch_machine/generate_draft tasks. Cron fallback for browser-driven generation."""
@@ -379,3 +395,11 @@ def _auto_init_db(flask_app):
     if AppSetting.query.get('version') is None:
         db.session.add(AppSetting(key_name='version', value='0.1.0'))
     db.session.commit()
+
+    # Seed pitch type configs on first boot (table empty = fresh install or reset)
+    from .models.pitch_config import PitchTypeConfig
+    if PitchTypeConfig.query.count() == 0:
+        from .pitch_machine.default_pitch_types import DEFAULT_PITCH_TYPES
+        for data in DEFAULT_PITCH_TYPES:
+            db.session.add(PitchTypeConfig(**data))
+        db.session.commit()
