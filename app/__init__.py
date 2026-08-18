@@ -290,10 +290,12 @@ def create_app(config_class=Config):
         # PitchApproval.status='sent' means process-queue delivered the email.
         # If the subsequent HubSpot write failed, the board still shows QUEUED.
         # Find those and write ATTEMPTED_TO_CONTACT now.
-        hs_fixed = 0
+        hs_fixed    = 0
+        hs_skipped  = 0
         sent_approvals = PitchApproval.query.filter_by(status='sent').all()
         for appr in sent_approvals:
             if not appr.hubspot_contact_id:
+                hs_skipped += 1
                 continue
             company = HubSpotCompany.query.filter_by(
                 hubspot_id=appr.hubspot_contact_id
@@ -314,10 +316,12 @@ def create_app(config_class=Config):
             except HubSpotError as e:
                 print(f'  Phase 3 HubSpot write failed for {appr.company_name}: {e}')
 
-        if hs_fixed:
-            print(f'\n{hs_fixed} portal pitch(es) reconciled (HubSpot write had previously failed).')
-        elif sent_approvals:
-            print(f'\nPhase 3: all {len(sent_approvals)} sent portal approvals already reconciled.')
+        total = len(sent_approvals)
+        linked = total - hs_skipped
+        print(f'\nPhase 3: {total} sent portal approvals total.')
+        print(f'  {hs_skipped} skipped — no hubspot_contact_id (not linked to a HubSpot company).')
+        if linked:
+            print(f'  {linked} HubSpot-linked: {hs_fixed} fixed, {linked - hs_fixed} already correct.')
 
     @app.cli.command('seed-pitch-types')
     def seed_pitch_types_command():
