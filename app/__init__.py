@@ -331,16 +331,28 @@ def create_app(config_class=Config):
 
         if still_unmatched:
             import os as _os
+            # Deduplicate by (to_address, subject) — Zoho sometimes returns one
+            # message per recipient (To + CC), producing identical-looking entries.
+            seen_pairs: set = set()
+            deduped = []
+            for msg in still_unmatched:
+                key = (msg['to_address'], msg['subject'])
+                if key not in seen_pairs:
+                    seen_pairs.add(key)
+                    deduped.append(msg)
+
             report_path = _os.path.expanduser('~/scan_sent_unmatched.txt')
             with open(report_path, 'w') as _f:
-                _f.write(f'scan-sent unmatched — {len(still_unmatched)} messages\n\n')
-                for msg in still_unmatched:
+                _f.write(f'scan-sent unmatched — {len(deduped)} messages '
+                         f'({len(still_unmatched) - len(deduped)} duplicates collapsed)\n\n')
+                for msg in deduped:
                     _f.write(f'{msg["to_address"]}\t{msg["subject"]}\t{msg.get("sent_at","")}\n')
-            print(f'\n{len(still_unmatched)} unmatched written to: {report_path}')
+            print(f'\n{len(deduped)} unmatched ({len(still_unmatched) - len(deduped)} dupes collapsed) '
+                  f'— written to: {report_path}')
             print('First 50:')
-            for msg in still_unmatched[:50]:
+            for msg in deduped[:50]:
                 print(f'  → {msg["to_address"]}: {msg["subject"][:65]}')
-            if len(still_unmatched) > 50:
+            if len(deduped) > 50:
                 print(f'  ... (see {report_path} for all)')
 
         # ── Phase 3: fix portal pitches where send succeeded but HubSpot write failed ──
