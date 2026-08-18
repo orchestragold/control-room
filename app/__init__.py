@@ -153,6 +153,63 @@ def create_app(config_class=Config):
 
         print(f'Done — {sent} sent, {failed} failed.')
 
+    @app.cli.command('debug-zoho-sent')
+    def debug_zoho_sent_command():
+        """
+        Diagnostic: dump Zoho folders + raw Sent messages without any filtering.
+        Helps identify why a specific message is missing from scan-sent output.
+        """
+        import re as _re
+        import requests as _requests
+        from app.integrations.zoho_mail import (
+            ZohoError, _get_access_token, get_account_id,
+        )
+
+        access_token = _get_access_token()
+        account_id   = get_account_id(access_token)
+        headers      = {'Authorization': f'Zoho-oauthtoken {access_token}'}
+
+        # 1. List all folders so we can confirm which one we're reading
+        folders_resp = _requests.get(
+            f'https://mail.zoho.com/api/accounts/{account_id}/folders',
+            headers=headers, timeout=15,
+        )
+        folders_resp.raise_for_status()
+        print('=== ZOHO FOLDERS ===')
+        for f in folders_resp.json().get('data', []):
+            print(f'  id={f["folderId"]}  name={f.get("folderName")!r}  count={f.get("messageCount")}')
+
+        sent_folder_id = next(
+            (f['folderId'] for f in folders_resp.json().get('data', [])
+             if f.get('folderName', '').lower() == 'sent'),
+            None,
+        )
+        if not sent_folder_id:
+            print('ERROR: No folder named "sent" found.')
+            return
+
+        # 2. Fetch raw messages — no timestamp filter, no matching
+        print(f'\n=== RAW SENT MESSAGES (folder {sent_folder_id}, first 200) ===')
+        resp = _requests.get(
+            f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
+            headers=headers,
+            params={'folderId': sent_folder_id, 'limit': 200, 'start': 0},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        raw_msgs = resp.json().get('data', [])
+        print(f'API returned {len(raw_msgs)} messages in this page.')
+
+        email_pat = _re.compile(r'[\w._%+\-]+@[\w.\-]+\.[a-zA-Z]{2,}')
+        print('\nAll messages (ts / to_address / subject):')
+        for msg in raw_msgs:
+            ts      = msg.get('sentDateInGMT') or msg.get('receivedTime') or '0'
+            to_raw  = msg.get('toAddress', '')
+            m       = email_pat.search(to_raw)
+            to_addr = m.group(0).lower() if m else to_raw[:60]
+            subj    = msg.get('subject', '')[:70]
+            print(f'  ts={ts}  to={to_addr}  subj={subj!r}')
+
     @app.cli.command('scan-sent')
     def scan_sent_command():
         """
