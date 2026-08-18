@@ -220,22 +220,17 @@ def create_app(config_class=Config):
 
         print(f'\n{matched} matched and updated.')
 
-        # ── Phase 2: reconcile unmatched against HubSpot cache via subject line ──
-        # Pitches sent outside the portal (Gmail Schedule Send, etc.) have no
-        # PitchApproval record. Try to match them to HubSpot companies by extracting
-        # the company name from the subject line and fuzzy-matching against the cache.
-        hs_reconciled = 0
+        # ── Phase 2: propose subject-line matches — NO auto-write, review required ──
+        # Prints proposed matches for your review. Confirmed matches: drag the card
+        # from QUEUED → SENT on the board (writes ATTEMPTED_TO_CONTACT directly).
+        proposed = []
         still_unmatched = []
 
         if unmatched:
             import re as _re
-            # Patterns that appear in Orchestra Gold pitch subject lines
             _SUBJECT_PATTERNS = [
-                # "Orchestra GOLD ✱ Festival Name 2027"  (most common)
                 _re.compile(r'Orchestra\s+GOLD\s+[✱✱*]\s+(.+?)\s+\d{4}', _re.IGNORECASE),
-                # "Orchestra GOLD — Festival Name 2027"
                 _re.compile(r'Orchestra\s+GOLD\s+[-–—]\s+(.+?)\s+\d{4}', _re.IGNORECASE),
-                # "Orchestra GOLD | Festival Name"  (fallback: no year)
                 _re.compile(r'Orchestra\s+GOLD\s+[|]\s+(.+)', _re.IGNORECASE),
             ]
 
@@ -250,11 +245,9 @@ def create_app(config_class=Config):
 
             def _find_company(extracted):
                 name_lower = extracted.lower()
-                exact = [c for c in all_companies
-                         if c.name.lower() == name_lower]
+                exact = [c for c in all_companies if c.name.lower() == name_lower]
                 if exact:
                     return exact[0]
-                # substring match — only if exactly one company matches
                 subs = [c for c in all_companies
                         if name_lower in c.name.lower() or c.name.lower() in name_lower]
                 return subs[0] if len(subs) == 1 else None
@@ -269,36 +262,23 @@ def create_app(config_class=Config):
                     continue
 
                 if company.hs_lead_status == 'ATTEMPTED_TO_CONTACT':
-                    print(f'  Already SENT in cache: {company.name} (skipped)')
+                    still_unmatched.append(msg)  # already SENT, no action needed
                     continue
 
-                try:
-                    sent_at = msg['sent_at']
-                    updates = {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'}
-                    if sent_at and not company.reach_out_1:
-                        updates['reach_out_1'] = sent_at.strftime('%Y-%m-%d')
-                    HubSpotClient().update_company(company.hubspot_id, updates)
-                    company.hs_lead_status = 'ATTEMPTED_TO_CONTACT'
-                    if sent_at and not company.reach_out_1:
-                        from datetime import date as _date
-                        company.reach_out_1 = sent_at.date()
-                    db.session.commit()
-                    hs_reconciled += 1
-                    print(f'  Auto-reconciled: {company.name} ← "{subject[:55]}"')
-                except HubSpotError as e:
-                    print(f'  HubSpot write failed for {company.name}: {e}')
-                    still_unmatched.append(msg)
+                proposed.append((company, msg))
 
-        if hs_reconciled:
-            print(f'\n{hs_reconciled} auto-reconciled from subject line match.')
+        if proposed:
+            print(f'\nPhase 2 — {len(proposed)} proposed match(es) (NOT applied — review and drag to SENT on the board to confirm):')
+            for company, msg in proposed:
+                print(f'  ? {company.name}  ←  "{msg["subject"][:65]}"')
 
         if still_unmatched:
-            print(f'\n{len(still_unmatched)} sent messages with no match '
-                  f'(drag manually to SENT on the board):')
-            for msg in still_unmatched[:25]:
-                print(f'  → {msg["to_address"]}: {msg["subject"][:60]}')
-            if len(still_unmatched) > 25:
-                print(f'  ... and {len(still_unmatched) - 25} more')
+            print(f'\n{len(still_unmatched)} unmatched — no confident subject-line match '
+                  f'(review and drag to SENT manually if pitched):')
+            for msg in still_unmatched[:50]:
+                print(f'  → {msg["to_address"]}: {msg["subject"][:65]}')
+            if len(still_unmatched) > 50:
+                print(f'  ... and {len(still_unmatched) - 50} more')
 
         # ── Phase 3: fix portal pitches where send succeeded but HubSpot write failed ──
         # PitchApproval.status='sent' means process-queue delivered the email.
