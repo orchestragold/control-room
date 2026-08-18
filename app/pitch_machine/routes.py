@@ -757,6 +757,141 @@ def reject(pid: int):
     return redirect(url_for('pitch_machine.review'))
 
 
+# ── Pitch type config admin (super_admin only) ───────────────────────────────────
+
+def _require_super_admin():
+    if current_user.role != 'super_admin':
+        abort(403)
+
+
+@pm_bp.route('/config')
+@login_required
+def config_list():
+    _require_super_admin()
+    from app.models.pitch_config import PitchTypeConfig
+    types = PitchTypeConfig.query.order_by(PitchTypeConfig.sort_order, PitchTypeConfig.id).all()
+    return render_template('pitch_machine/config.html', types=types)
+
+
+@pm_bp.route('/config/new', methods=['GET', 'POST'])
+@login_required
+def config_new():
+    _require_super_admin()
+    from app.models.pitch_config import PitchTypeConfig
+
+    if request.method == 'POST':
+        name                 = request.form.get('name', '').strip()
+        archive_dropbox_path = request.form.get('archive_dropbox_path', '').strip()
+        prompt_template      = request.form.get('prompt_template', '').strip()
+        badge_color          = request.form.get('badge_color', '#888888').strip()
+        sort_order           = int(request.form.get('sort_order', 0) or 0)
+
+        error = _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color)
+        if error:
+            flash(error, 'error')
+            return render_template('pitch_machine/config_form.html',
+                                   mode='new', form=request.form)
+
+        if PitchTypeConfig.query.filter_by(name=name).first():
+            flash(f'A pitch type named {name!r} already exists.', 'error')
+            return render_template('pitch_machine/config_form.html',
+                                   mode='new', form=request.form)
+
+        db.session.add(PitchTypeConfig(
+            name=name,
+            archive_dropbox_path=archive_dropbox_path,
+            prompt_template=prompt_template,
+            badge_color=badge_color,
+            sort_order=sort_order,
+            active=True,
+        ))
+        db.session.commit()
+        flash(f'Pitch type {name!r} created.', 'success')
+        return redirect(url_for('pitch_machine.config_list'))
+
+    return render_template('pitch_machine/config_form.html', mode='new', form={})
+
+
+@pm_bp.route('/config/<int:tid>/edit', methods=['GET', 'POST'])
+@login_required
+def config_edit(tid: int):
+    _require_super_admin()
+    from app.models.pitch_config import PitchTypeConfig
+
+    pt = PitchTypeConfig.query.get_or_404(tid)
+
+    if request.method == 'POST':
+        name                 = request.form.get('name', '').strip()
+        archive_dropbox_path = request.form.get('archive_dropbox_path', '').strip()
+        prompt_template      = request.form.get('prompt_template', '').strip()
+        badge_color          = request.form.get('badge_color', '#888888').strip()
+        sort_order           = int(request.form.get('sort_order', 0) or 0)
+
+        error = _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color)
+        if error:
+            flash(error, 'error')
+            return render_template('pitch_machine/config_form.html',
+                                   mode='edit', pt=pt, form=request.form)
+
+        conflict = PitchTypeConfig.query.filter(
+            PitchTypeConfig.name == name,
+            PitchTypeConfig.id != tid,
+        ).first()
+        if conflict:
+            flash(f'Another pitch type is already named {name!r}.', 'error')
+            return render_template('pitch_machine/config_form.html',
+                                   mode='edit', pt=pt, form=request.form)
+
+        pt.name                 = name
+        pt.archive_dropbox_path = archive_dropbox_path
+        pt.prompt_template      = prompt_template
+        pt.badge_color          = badge_color
+        pt.sort_order           = sort_order
+        db.session.commit()
+        flash(f'Pitch type {name!r} updated.', 'success')
+        return redirect(url_for('pitch_machine.config_list'))
+
+    return render_template('pitch_machine/config_form.html',
+                           mode='edit', pt=pt, form={
+                               'name':                 pt.name,
+                               'archive_dropbox_path': pt.archive_dropbox_path,
+                               'prompt_template':      pt.prompt_template,
+                               'badge_color':          pt.badge_color,
+                               'sort_order':           pt.sort_order,
+                           })
+
+
+@pm_bp.route('/config/<int:tid>/toggle', methods=['POST'])
+@login_required
+@csrf.exempt
+def config_toggle(tid: int):
+    _require_super_admin()
+    from app.models.pitch_config import PitchTypeConfig
+    pt = PitchTypeConfig.query.get_or_404(tid)
+    pt.active = not pt.active
+    db.session.commit()
+    state = 'activated' if pt.active else 'deactivated'
+    return jsonify({'ok': True, 'active': pt.active, 'message': f'{pt.name} {state}.'})
+
+
+def _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color) -> str:
+    from app.models.pitch_config import PitchTypeConfig
+    if not name:
+        return 'Name is required.'
+    if not archive_dropbox_path:
+        return 'Dropbox archive path is required.'
+    if not archive_dropbox_path.startswith('/'):
+        return 'Dropbox archive path must start with /.'
+    if not prompt_template:
+        return 'Prompt template is required.'
+    template_error = PitchTypeConfig.validate_template(prompt_template)
+    if template_error:
+        return template_error
+    if not badge_color.startswith('#') or len(badge_color) != 7:
+        return 'Badge color must be a 7-character hex value (e.g. #5aaa7a).'
+    return ''
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────────
 
 def _get_type_colors() -> dict:

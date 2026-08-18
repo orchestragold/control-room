@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Edit' if mode == 'edit' else 'New' }} Pitch Type — The Portal{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .cfg-header {
+    display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .cfg-title { font-size: 20px; font-weight: 300; color: #fff; }
+  .cfg-back  { font-size: 13px; color: #888; text-decoration: none; }
+  .cfg-back:hover { color: #ccc; }
+
+  .notice {
+    font-size: 12px; padding: 10px 14px; border-radius: 3px;
+    margin-bottom: 16px; line-height: 1.5;
+  }
+  .notice-error { background: #1c0a0a; border: 1px solid #3a1010; color: #f87171; }
+
+  .form-card {
+    background: #0a0a0a; border: 1px solid #1e1e1e; border-radius: 3px;
+    padding: 24px; max-width: 720px;
+  }
+
+  .field { margin-bottom: 20px; }
+  .field label {
+    display: block; font-size: 11px; color: #666; letter-spacing: 0.05em;
+    text-transform: uppercase; margin-bottom: 6px;
+  }
+  .field input[type="text"],
+  .field input[type="number"],
+  .field textarea {
+    width: 100%; padding: 8px 10px; background: #0d0d0d;
+    border: 1px solid #2a2a2a; border-radius: 2px; color: #ddd;
+    font-size: 13px; font-family: inherit; box-sizing: border-box;
+  }
+  .field textarea { resize: vertical; min-height: 320px; font-family: monospace; font-size: 12px; line-height: 1.6; }
+  .field input:focus, .field textarea:focus {
+    outline: 1px solid #3a5a3a; border-color: #3a5a3a;
+  }
+  .field-hint { font-size: 11px; color: #444; margin-top: 5px; line-height: 1.5; }
+
+  .color-row { display: flex; align-items: center; gap: 12px; }
+  .color-row input[type="color"] {
+    width: 44px; height: 32px; padding: 2px; border: 1px solid #2a2a2a;
+    border-radius: 2px; background: #0d0d0d; cursor: pointer;
+  }
+  .color-preview {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 3px 9px; border-radius: 2px;
+    white-space: nowrap; transition: all 0.15s;
+  }
+  .color-hex { font-size: 12px; color: #666; font-family: monospace; }
+
+  .form-actions { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+  .btn-save {
+    font-size: 13px; padding: 8px 20px; border-radius: 3px; cursor: pointer;
+    border: 1px solid #2a4a2a; background: #1a2e1a; color: #6aaa7a;
+  }
+  .btn-save:hover { background: #223022; border-color: #3a5a3a; }
+  .btn-cancel {
+    font-size: 13px; color: #666; text-decoration: none;
+  }
+  .btn-cancel:hover { color: #aaa; }
+
+  .name-warning {
+    font-size: 11px; color: #c8900a; margin-top: 5px; display: none;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cfg-header">
+  <h1 class="cfg-title">{{ 'Edit pitch type' if mode == 'edit' else 'New pitch type' }}</h1>
+  <a href="{{ url_for('pitch_machine.config_list') }}" class="cfg-back">← Pitch Types</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+  <div class="notice notice-{{ cat }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+<div class="form-card">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="field">
+      <label for="name">Type name</label>
+      <input type="text" id="name" name="name"
+             value="{{ form.get('name', '') }}"
+             placeholder="e.g. Festival, WAA, PNW Tour - Media"
+             required
+             {% if mode == 'edit' %}oninput="checkNameChange(this)"{% endif %}>
+      {% if mode == 'edit' %}
+      <div class="name-warning" id="name-warning">
+        ⚠ Renaming changes how existing pitch_approval records display. Make sure no pending or approved drafts use this type before renaming.
+      </div>
+      {% endif %}
+      <div class="field-hint">Exact string stored on pitch_approval records. Case-sensitive.</div>
+    </div>
+
+    <div class="field">
+      <label for="archive_dropbox_path">Dropbox archive path</label>
+      <input type="text" id="archive_dropbox_path" name="archive_dropbox_path"
+             value="{{ form.get('archive_dropbox_path', '') }}"
+             placeholder="/PNW Tour - Media.docx"
+             required>
+      <div class="field-hint">
+        Path in your Dropbox App folder (starts with <code>/</code>).
+        After saving, upload the file to Dropbox then run <strong>↻ Sync Knowledge</strong>.
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="badge_color">Badge color</label>
+      <div class="color-row">
+        <input type="color" id="badge_color_picker"
+               value="{{ form.get('badge_color', '#888888') }}"
+               oninput="syncColor(this.value)">
+        <span class="color-preview" id="color-preview"
+              style="color:{{ form.get('badge_color','#888888') }};background:color-mix(in srgb,{{ form.get('badge_color','#888888') }} 12%,#000);border:1px solid color-mix(in srgb,{{ form.get('badge_color','#888888') }} 30%,#000);">
+          {{ form.get('name', 'Preview') or 'Preview' }}
+        </span>
+        <span class="color-hex" id="color-hex">{{ form.get('badge_color', '#888888') }}</span>
+      </div>
+      <input type="hidden" id="badge_color" name="badge_color"
+             value="{{ form.get('badge_color', '#888888') }}">
+    </div>
+
+    <div class="field">
+      <label for="sort_order">Sort order</label>
+      <input type="number" id="sort_order" name="sort_order"
+             value="{{ form.get('sort_order', 0) }}"
+             min="0" max="999" style="width:100px;">
+      <div class="field-hint">Lower numbers appear first in the pitch type selector.</div>
+    </div>
+
+    <div class="field">
+      <label for="prompt_template">Prompt template</label>
+      <textarea id="prompt_template" name="prompt_template"
+                placeholder="Draft a Touch 1 ... pitch for the following target.&#10;&#10;Target: {name}&#10;Website: {website}&#10;Notes: {description}&#10;&#10;...">{{ form.get('prompt_template', '') }}</textarea>
+      <div class="field-hint">
+        Must contain <code>{name}</code>, <code>{website}</code>, and <code>{description}</code>.
+        These are substituted at generation time. No other curly-brace placeholders allowed.
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn-save">
+        {{ 'Save changes' if mode == 'edit' else 'Create pitch type' }}
+      </button>
+      <a href="{{ url_for('pitch_machine.config_list') }}" class="btn-cancel">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+var _originalName = {{ ('"' + form.get('name','') + '"') | safe }};
+
+function syncColor(hex) {
+  document.getElementById('badge_color').value = hex;
+  document.getElementById('color-hex').textContent = hex;
+  var preview = document.getElementById('color-preview');
+  preview.style.color = hex;
+  preview.style.background = 'color-mix(in srgb,' + hex + ' 12%,#000)';
+  preview.style.border = '1px solid color-mix(in srgb,' + hex + ' 30%,#000)';
+}
+
+document.getElementById('name') && document.getElementById('name').addEventListener('input', function () {
+  var preview = document.getElementById('color-preview');
+  if (preview) preview.textContent = this.value || 'Preview';
+});
+
+function checkNameChange(input) {
+  var warn = document.getElementById('name-warning');
+  if (warn) warn.style.display = (input.value !== _originalName) ? 'block' : 'none';
+}
+</script>
+{% endblock %}

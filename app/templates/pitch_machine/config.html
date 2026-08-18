@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% block title %}Pitch Types — The Portal{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .cfg-header {
+    display: flex; align-items: baseline; gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .cfg-title { font-size: 20px; font-weight: 300; color: #fff; }
+  .cfg-back  { font-size: 13px; color: #888; text-decoration: none; }
+  .cfg-back:hover { color: #ccc; }
+
+  .notice {
+    font-size: 12px; padding: 10px 14px; border-radius: 3px;
+    margin-bottom: 16px; line-height: 1.5;
+  }
+  .notice-success { background: #0a1a10; border: 1px solid #1a3020; color: #6aaa7a; }
+  .notice-error   { background: #1c0a0a; border: 1px solid #3a1010; color: #f87171; }
+
+  .cfg-table {
+    width: 100%; border-collapse: collapse;
+    border: 1px solid #1e1e1e; border-radius: 3px; overflow: hidden;
+    font-size: 13px;
+  }
+  .cfg-table th {
+    text-align: left; padding: 10px 14px;
+    background: #0a0a0a; color: #555; font-weight: 400; font-size: 11px;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  .cfg-table td {
+    padding: 10px 14px; border-bottom: 1px solid #141414; color: #ccc;
+    vertical-align: middle;
+  }
+  .cfg-table tr:last-child td { border-bottom: none; }
+  .cfg-table tr.inactive td  { opacity: 0.45; }
+
+  .type-badge {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 2px;
+    white-space: nowrap;
+  }
+  .color-swatch {
+    display: inline-block; width: 14px; height: 14px;
+    border-radius: 2px; border: 1px solid #333;
+    vertical-align: middle; margin-right: 6px;
+  }
+  .path-cell { font-family: monospace; font-size: 11px; color: #888; }
+
+  .row-actions { display: flex; gap: 8px; align-items: center; }
+  .btn-sm {
+    font-size: 11px; padding: 3px 10px; border-radius: 2px; cursor: pointer;
+    border: 1px solid #2a2a2a; background: #111; color: #888;
+    text-decoration: none; display: inline-block;
+  }
+  .btn-sm:hover { color: #ccc; border-color: #444; }
+  .btn-sm.edit  { color: #5a8aaa; border-color: #1a3050; background: #0a1018; }
+  .btn-sm.edit:hover { color: #8ab8d8; }
+  .btn-toggle   { font-size: 11px; padding: 3px 10px; border-radius: 2px; cursor: pointer;
+                  border: none; background: none; }
+  .btn-toggle.active   { color: #888; }
+  .btn-toggle.active:hover { color: #f87171; }
+  .btn-toggle.inactive { color: #5aaa7a; }
+  .btn-toggle.inactive:hover { color: #8adaa8; }
+
+  .add-row {
+    margin-top: 16px;
+  }
+  .btn-add {
+    font-size: 13px; padding: 8px 18px; border-radius: 3px; cursor: pointer;
+    border: 1px solid #2a4a2a; background: #1a2e1a; color: #6aaa7a;
+    text-decoration: none; display: inline-block;
+  }
+  .btn-add:hover { background: #223022; border-color: #3a5a3a; }
+
+  .template-note {
+    font-size: 11px; color: #444; margin-top: 6px; line-height: 1.5;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cfg-header">
+  <h1 class="cfg-title">Pitch Types</h1>
+  <a href="{{ url_for('pitch_machine.board') }}" class="cfg-back">← Board</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+  <div class="notice notice-{{ 'success' if cat == 'success' else 'error' }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+
+<table class="cfg-table">
+  <thead>
+    <tr>
+      <th>Type</th>
+      <th>Archive path</th>
+      <th>Order</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for pt in types %}
+    <tr class="{{ '' if pt.active else 'inactive' }}">
+      <td>
+        <span class="type-badge"
+              style="color:{{ pt.badge_color }};background:color-mix(in srgb,{{ pt.badge_color }} 12%,#000);border:1px solid color-mix(in srgb,{{ pt.badge_color }} 30%,#000);">
+          {{ pt.name }}
+        </span>
+        <span class="color-swatch" style="background:{{ pt.badge_color }};"></span>
+        {{ pt.badge_color }}
+      </td>
+      <td class="path-cell">{{ pt.archive_dropbox_path }}</td>
+      <td>{{ pt.sort_order }}</td>
+      <td>{{ 'Active' if pt.active else 'Inactive' }}</td>
+      <td>
+        <div class="row-actions">
+          <a href="{{ url_for('pitch_machine.config_edit', tid=pt.id) }}" class="btn-sm edit">Edit</a>
+          <button class="btn-toggle {{ 'active' if pt.active else 'inactive' }}"
+                  onclick="toggleType({{ pt.id }}, this)"
+                  data-id="{{ pt.id }}">
+            {{ 'Deactivate' if pt.active else 'Activate' }}
+          </button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="add-row">
+  <a href="{{ url_for('pitch_machine.config_new') }}" class="btn-add">+ Add pitch type</a>
+</div>
+
+<p class="template-note">
+  After adding a new type, upload the corresponding <code>.docx</code> archive to your Dropbox App folder,
+  then use <strong>↻ Sync Knowledge</strong> on the Draft Pitches page before generating drafts for it.
+</p>
+
+<script>
+var _toggleBase = '{{ url_for("pitch_machine.config_toggle", tid=0) }}'.replace('/0/', '/');
+function toggleType(id, btn) {
+  fetch(_toggleBase + id + '/toggle', {
+    method: 'POST', credentials: 'same-origin',
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.ok) return;
+    var row = btn.closest('tr');
+    row.className = data.active ? '' : 'inactive';
+    btn.className = 'btn-toggle ' + (data.active ? 'active' : 'inactive');
+    btn.textContent = data.active ? 'Deactivate' : 'Activate';
+    // update status cell
+    var cells = row.querySelectorAll('td');
+    cells[3].textContent = data.active ? 'Active' : 'Inactive';
+  });
+}
+</script>
+{% endblock %}

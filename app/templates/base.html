@@ -384,6 +384,10 @@
            class="nav-item top-level{% if request.endpoint == 'main.posting_tool' %} active{% endif %}">
           Posting Tool
         </a>
+        <a href="{{ url_for('pitch_machine.config_list') }}"
+           class="nav-item top-level{% if request.endpoint and 'config' in request.endpoint %} active{% endif %}">
+          Pitch Types
+        </a>
         {% endif %}
       </nav>
 
