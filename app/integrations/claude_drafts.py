@@ -132,6 +132,36 @@ Body:
 [full pitch body]\
 """
 
+_PNW_MEDIA_TEMPLATE = """\
+Draft a Touch 1 press/media outreach pitch for the following journalist, DJ, or media contact \
+regarding Orchestra Gold's upcoming September PNW tour.
+
+Contact/Outlet: {name}
+Website: {website}
+Notes: {description}
+
+PNW tour context: Orchestra Gold is playing four confirmed September shows — \
+Arcata Sep 23 (Miniplex), Astoria Sep 24 (KALA), Portland Sep 25 (Turn! Turn! Turn!), \
+Seattle Sep 28 (Clock Out Lounge). This is a media pitch — seeking coverage, airplay, \
+a feature, or a calendar listing, depending on the outlet. Not a booking inquiry.
+
+Produce your response in exactly this format (no other headings):
+
+## Research Brief
+Cover each of the following; mark anything you cannot confirm with "⚠ Could not confirm:":
+- Contact name, title, and outlet
+- Beat/coverage focus (music genre, local scene, world music, etc.)
+- Relevant past coverage of similar artists or tour coverage
+- Best angle for Orchestra Gold (feature, preview, airplay, listing)
+- Fit reasoning for the September PNW tour specifically
+- Which tour stop(s) are most relevant to this contact's geography/beat
+
+## Pitch Draft
+Subject: [subject line]
+Body:
+[full pitch body]\
+"""
+
 _DEFAULT_TEMPLATE = """\
 Draft a Touch 1 outreach pitch for the following target.
 
@@ -156,11 +186,12 @@ Body:
 from app.pitch_machine.pitch_types import PITCH_TYPE_SET  # noqa: E402
 
 _TEMPLATES = {
-    'Festival':    _FESTIVAL_TEMPLATE,
-    'WAA':         _WAA_TEMPLATE,
-    'PNW':         _PNW_TEMPLATE,
-    'Show Invite': _DEFAULT_TEMPLATE,
-    'Distribution':_DEFAULT_TEMPLATE,
+    'Festival':         _FESTIVAL_TEMPLATE,
+    'WAA':              _WAA_TEMPLATE,
+    'PNW':              _PNW_TEMPLATE,
+    'PNW Tour - Media': _PNW_MEDIA_TEMPLATE,
+    'Show Invite':      _DEFAULT_TEMPLATE,
+    'Distribution':     _DEFAULT_TEMPLATE,
 }
 
 

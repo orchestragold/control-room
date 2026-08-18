@@ -26,11 +26,12 @@ RULES_PATH = '/PITCH_MACHINE_RULES.md'
 
 # Per-pitch-type archive files. Keys must match PITCH_TYPES in pitch_machine/pitch_types.py.
 ARCHIVE_PATHS: dict[str, str] = {
-    'Festival':    '/2026 pitches.docx',
-    'WAA':         '/WAA pitches.docx',
-    'PNW':         '/PNW pitches.docx',
-    'Show Invite': '/2026 pitches.docx',   # reuse festival archive until dedicated one exists
-    'Distribution':'/2026 pitches.docx',   # same
+    'Festival':        '/2026 pitches.docx',
+    'WAA':             '/WAA pitches.docx',
+    'PNW':             '/PNW pitches.docx',
+    'PNW Tour - Media':'/PNW Tour - Media.docx',
+    'Show Invite':     '/2026 pitches.docx',   # reuse festival archive until dedicated one exists
+    'Distribution':    '/2026 pitches.docx',   # same
 }
 
 # All paths that need to be in the DB cache (rules + every archive).

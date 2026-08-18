@@ -9,6 +9,7 @@ PITCH_TYPES: list[str] = [
     'Festival',
     'WAA',
     'PNW',
+    'PNW Tour - Media',
     'Show Invite',
     'Distribution',
 ]

@@ -23,6 +23,7 @@
   }
   .notice-warn  { background: #1c1200; border: 1px solid #3a2800; color: #c8a050; }
   .notice-error { background: #1c0a0a; border: 1px solid #3a1010; color: #f87171; }
+  .notice-ok    { background: #0a1c10; border: 1px solid #1a3820; color: #6aaa7a; }
 
   .dq-controls {
     display: flex;
@@ -91,6 +92,7 @@
   .type-waa         { background: #0a0e1c; border: 1px solid #1a2050; color: #5a7aaa; }
   .type-show-invite { background: #1a0e1a; border: 1px solid #3a1a40; color: #aa5aaa; }
   .type-pnw         { background: #1a1000; border: 1px solid #402800; color: #c8900a; }
+  .type-pnw-media   { background: #001a1a; border: 1px solid #003a3a; color: #3ab8b8; }
   .type-other       { background: #141414; border: 1px solid #2a2a2a; color: #888; }
 
   .draft-badge {
@@ -182,18 +184,26 @@
 {% block content %}
 <div class="dq-header">
   <h1 class="dq-title">Draft Pitches</h1>
-  <a href="{{ url_for('pitch_machine.board') }}" class="dq-back">← Board</a>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <form method="post" action="{{ url_for('pitch_machine.sync_knowledge') }}" style="margin:0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="dq-back" style="background:none;border:none;cursor:pointer;padding:0;">
+        ↻ Sync Knowledge
+      </button>
+    </form>
+    <a href="{{ url_for('pitch_machine.board') }}" class="dq-back">← Board</a>
+  </div>
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}
-  <div class="notice notice-{{ 'error' if cat == 'error' else 'warn' }}">{{ msg }}</div>
+  <div class="notice notice-{{ cat if cat in ('error', 'ok') else 'warn' }}">{{ msg }}</div>
   {% endfor %}
 {% endwith %}
 
 {% if not knowledge_ready %}
 <div class="notice notice-error">
-  Knowledge base not synced — run <code>flask sync-knowledge</code> before generating drafts.
+  Knowledge base not synced — click <strong>↻ Sync Knowledge</strong> above before generating drafts.
 </div>
 {% endif %}
 
@@ -253,7 +263,7 @@
         </select>
         {% else %}
         {% set pt = entry.pitch_type %}
-        <span class="type-badge {% if pt == 'Festival' %}type-festival{% elif pt == 'WAA' %}type-waa{% elif pt == 'Show Invite' %}type-show-invite{% elif pt == 'PNW' %}type-pnw{% else %}type-other{% endif %}">
+        <span class="type-badge {% if pt == 'Festival' %}type-festival{% elif pt == 'WAA' %}type-waa{% elif pt == 'Show Invite' %}type-show-invite{% elif pt == 'PNW' %}type-pnw{% elif pt == 'PNW Tour - Media' %}type-pnw-media{% else %}type-other{% endif %}">
           {{ pt }}
         </span>
         {% endif %}

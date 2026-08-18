@@ -368,6 +368,22 @@ def draft_queue():
     )
 
 
+# ── Sync knowledge base ──────────────────────────────────────────────────────────
+
+@pm_bp.route('/sync-knowledge', methods=['POST'])
+@login_required
+def sync_knowledge():
+    _require_access()
+    from app.integrations.dropbox_sync import DropboxError, sync_knowledge_to_cache
+    try:
+        results = sync_knowledge_to_cache()
+        lines = [f'{path}: {count:,} chars' for path, count in sorted(results.items())]
+        flash('Knowledge synced — ' + ' · '.join(lines), 'ok')
+    except DropboxError as e:
+        flash(f'Sync failed: {e}', 'error')
+    return redirect(url_for('pitch_machine.draft_queue'))
+
+
 # ── Generate drafts ──────────────────────────────────────────────────────────────
 
 @pm_bp.route('/generate', methods=['POST'])
