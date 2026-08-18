@@ -34,8 +34,11 @@ ARCHIVE_PATHS: dict[str, str] = {
     'Distribution':    '/2026 pitches.docx',   # same
 }
 
-# All paths that need to be in the DB cache (rules + every archive).
-KNOWLEDGE_PATHS = [RULES_PATH] + sorted(set(ARCHIVE_PATHS.values()))
+def knowledge_paths() -> list[str]:
+    """All paths that need to be in the DB cache (rules + every archive).
+    Defined as a function so item 2's DB-driven config can swap the body without
+    changing any call sites in sync_knowledge_to_cache / get_knowledge_content."""
+    return [RULES_PATH] + sorted(set(ARCHIVE_PATHS.values()))
 
 _TOKEN_URL   = 'https://api.dropbox.com/oauth2/token'
 _DOWNLOAD_URL = 'https://content.dropboxapi.com/2/files/download'
@@ -175,7 +178,7 @@ def sync_knowledge_to_cache(paths: Optional[list[str]] = None) -> dict[str, int]
     from app.models.knowledge import DropboxSync
 
     if paths is None:
-        paths = KNOWLEDGE_PATHS
+        paths = knowledge_paths()
 
     access_token = _get_access_token()
     results: dict[str, int] = {}
@@ -204,13 +207,14 @@ def get_knowledge_content() -> dict[str, str]:
     from app.models.knowledge import DropboxSync
 
     records = {r.path: r.content for r in DropboxSync.query.all() if r.content}
-    missing = [p for p in KNOWLEDGE_PATHS if p not in records]
+    paths = knowledge_paths()
+    missing = [p for p in paths if p not in records]
     if missing:
         raise DropboxError(
             'Knowledge base not synced — run `flask sync-knowledge`. '
             f'Missing: {missing}'
         )
-    return {p: records[p] for p in KNOWLEDGE_PATHS}
+    return {p: records[p] for p in paths}
 
 
 def get_knowledge_for_pitch_type(pitch_type: str) -> tuple[str, str]:

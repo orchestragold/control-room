@@ -229,6 +229,124 @@ def create_app(config_class=Config):
             if len(unmatched) > 25:
                 print(f'  ... and {len(unmatched) - 25} more')
 
+    @app.cli.command('generate-drafts')
+    def generate_drafts_command():
+        """Process pending pitch_machine/generate_draft tasks. Cron fallback for browser-driven generation."""
+        import re
+        from datetime import date, datetime, timedelta
+        from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
+        from app.models.pitch import PitchApproval
+        from app.models.queue import APITaskQueue
+        from app.utils.sanitize import sanitize_body_html
+
+        _CC = 'booking@orchestragold.com'
+
+        def _parse_date(value):
+            if not value:
+                return None
+            try:
+                return datetime.strptime(value, '%Y-%m-%d').date()
+            except ValueError:
+                return None
+
+        def _first_email(*sources):
+            pat = re.compile(r'\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b')
+            for text in sources:
+                if not text:
+                    continue
+                for m in pat.finditer(text):
+                    addr = m.group(0).lower()
+                    if 'orchestragold.com' not in addr:
+                        return addr
+            return ''
+
+        # Reset tasks stuck in 'processing' for > 10 min
+        stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
+        stale = (
+            APITaskQueue.query
+            .filter_by(platform='pitch_machine', task_type='generate_draft', status='processing')
+            .filter(APITaskQueue.started_at < stale_cutoff)
+            .all()
+        )
+        for t in stale:
+            t.status      = 'pending'
+            t.retry_count += 1
+        if stale:
+            db.session.commit()
+            print(f'Reset {len(stale)} stale task(s).')
+
+        tasks = (
+            APITaskQueue.query
+            .filter_by(platform='pitch_machine', task_type='generate_draft', status='pending')
+            .filter(APITaskQueue.retry_count < APITaskQueue.max_retries)
+            .order_by(APITaskQueue.created_at)
+            .all()
+        )
+
+        if not tasks:
+            print('No pending generate_draft tasks.')
+            return
+
+        print(f'{len(tasks)} pending task(s).')
+        succeeded = 0
+        failed    = 0
+
+        for task in tasks:
+            task.status     = 'processing'
+            task.started_at = datetime.utcnow()
+            db.session.commit()
+
+            payload    = task.payload or {}
+            entry_type = payload.get('entry_type', 'hubspot')
+            pitch_type = payload.get('pitch_type', 'Festival')
+
+            if entry_type == 'hubspot':
+                name        = payload.get('name', '')
+                website     = payload.get('website') or None
+                description = payload.get('description') or None
+                hubspot_id  = payload.get('hubspot_id', '')
+            else:
+                name        = payload.get('item_name', '')
+                website     = None
+                description = payload.get('notes') or None
+                hubspot_id  = payload.get('hubspot_id', '')
+
+            send_date = _parse_date(payload.get('send_date') or '')
+
+            try:
+                draft = DraftGenerator(pitch_type=pitch_type).generate(
+                    name=name, website=website, description=description,
+                )
+            except DraftGenerationError as e:
+                task.status        = 'failed'
+                task.error_message = str(e)
+                task.completed_at  = datetime.utcnow()
+                db.session.commit()
+                failed += 1
+                print(f'  Failed: {name}: {e}')
+                continue
+
+            db.session.add(PitchApproval(
+                hubspot_contact_id = hubspot_id,
+                company_name       = name,
+                pitch_type         = pitch_type,
+                touch_number       = 1,
+                draft_subject      = draft.subject,
+                draft_body         = sanitize_body_html(draft.body),
+                research_notes     = draft.research_notes,
+                to_email           = _first_email(draft.research_notes),
+                cc_email           = _CC,
+                send_date          = send_date,
+                status             = 'pending',
+            ))
+            task.status       = 'completed'
+            task.completed_at = datetime.utcnow()
+            db.session.commit()
+            succeeded += 1
+            print(f'  Done: {name}')
+
+        print(f'Finished: {succeeded} succeeded, {failed} failed.')
+
     @app.cli.command('sync-knowledge')
     def sync_knowledge_command():
         """Pull Dropbox knowledge files into the local cache. Safe to re-run."""

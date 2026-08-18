@@ -479,7 +479,7 @@ def generate():
                     'item_name':  item_name,
                     'pitch_type': item.pitch_type,
                     'notes':      item.notes or '',
-                    'send_date':  item.send_date.isoformat() if item.send_date else None,
+                    'send_date':  item.deadline.isoformat() if item.deadline else None,
                     'hubspot_id': item.hubspot_id or '',
                 },
                 created_by = current_user.id,
