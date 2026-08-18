@@ -365,6 +365,7 @@ def draft_queue():
         knowledge_ready=knowledge_ready,
         batch_limit=_GENERATE_BATCH_LIMIT,
         pitch_types=PITCH_TYPES,
+        pending_gen=_pending_gen_count(),
     )
 
 
@@ -404,19 +405,10 @@ def generate():
         )
         return redirect(url_for('pitch_machine.draft_queue'))
 
-    from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
-    from app.integrations.dropbox_sync import get_or_create_queue_csv, DropboxError
+    from app.integrations.dropbox_sync import get_or_create_queue_csv
     from app.integrations.pitch_queue import parse_queue
+    from app.pitch_machine.pitch_types import PITCH_TYPE_SET
 
-    # Generators are cached per pitch type — one instance per type in the batch
-    _generators: dict[str, DraftGenerator] = {}
-
-    def _get_generator(pitch_type: str) -> DraftGenerator:
-        if pitch_type not in _generators:
-            _generators[pitch_type] = DraftGenerator(pitch_type=pitch_type)
-        return _generators[pitch_type]
-
-    # Load queue sheet items for lookup
     try:
         queue_items = {item.name: item for item in parse_queue(get_or_create_queue_csv())}
     except Exception:
@@ -429,15 +421,10 @@ def generate():
         return redirect(url_for('pitch_machine.draft_queue'))
 
     company_map = {c.hubspot_id: c for c in companies}
-
-    errors: list[str] = []
-    created = 0
-
-    from app.pitch_machine.pitch_types import PITCH_TYPE_SET
+    queued = 0
 
     for entry_id in entry_ids:
         if entry_id.startswith('hs:'):
-            # ── HubSpot company ──────────────────────────────────────────────────
             hs_id   = entry_id[3:]
             company = company_map.get(hs_id)
             if company is None or company.is_duplicate:
@@ -447,90 +434,155 @@ def generate():
                 hubspot_contact_id=hs_id, status='pending'
             ).first()
             if existing:
-                errors.append(f'{company.name}: pending draft already exists — skipped')
+                flash(f'{company.name}: pending draft already exists — skipped', 'error')
                 continue
 
-            # C4: read pitch type from form field; default to Festival
             pitch_type = request.form.get(f'pt_hs_{hs_id}', 'Festival')
             if pitch_type not in PITCH_TYPE_SET:
                 pitch_type = 'Festival'
 
-            try:
-                draft = _get_generator(pitch_type).generate(
-                    name=company.name,
-                    website=company.website,
-                    description=company.description,
-                )
-            except DraftGenerationError as e:
-                errors.append(f'{company.name}: {e}')
-                continue
-
-            db.session.add(PitchApproval(
-                hubspot_contact_id = hs_id,
-                company_name       = company.name,
-                pitch_type         = pitch_type,
-                touch_number       = 1,
-                draft_subject      = draft.subject,
-                draft_body         = sanitize_body_html(draft.body),  # O2
-                research_notes     = draft.research_notes,
-                to_email           = _extract_email(draft.research_notes),
-                cc_email           = _DEFAULT_CC,
-                send_date          = company.reach_out_1,
-                status             = 'pending',
+            db.session.add(APITaskQueue(
+                platform  = 'pitch_machine',
+                task_type = 'generate_draft',
+                payload   = {
+                    'entry_type':  'hubspot',
+                    'hubspot_id':  hs_id,
+                    'pitch_type':  pitch_type,
+                    'name':        company.name,
+                    'website':     company.website or '',
+                    'description': company.description or '',
+                    'send_date':   company.reach_out_1.isoformat() if company.reach_out_1 else None,
+                },
+                created_by = current_user.id,
             ))
-            created += 1
+            queued += 1
 
         elif entry_id.startswith('qs:'):
-            # ── Queue-sheet item ─────────────────────────────────────────────────
             item_name = entry_id[3:]
             item      = queue_items.get(item_name)
             if item is None:
-                errors.append(f'{item_name!r}: not found in queue sheet — skipped')
+                flash(f'{item_name!r}: not found in queue sheet — skipped', 'error')
                 continue
 
             existing = PitchApproval.query.filter_by(
                 company_name=item_name, status='pending'
             ).first()
             if existing:
-                errors.append(f'{item_name}: pending draft already exists — skipped')
+                flash(f'{item_name}: pending draft already exists — skipped', 'error')
                 continue
 
-            try:
-                draft = _get_generator(item.pitch_type).generate(
-                    name=item_name,
-                    website=None,
-                    description=item.notes or None,
-                )
-            except DraftGenerationError as e:
-                errors.append(f'{item_name}: {e}')
-                continue
-
-            db.session.add(PitchApproval(
-                hubspot_contact_id = item.hubspot_id or '',
-                company_name       = item_name,
-                pitch_type         = item.pitch_type,
-                touch_number       = 1,
-                draft_subject      = draft.subject,
-                draft_body         = sanitize_body_html(draft.body),  # O2
-                research_notes     = draft.research_notes,
-                to_email           = _extract_email(item.notes, draft.research_notes),
-                cc_email           = _DEFAULT_CC,
-                send_date          = item.send_date,
-                status             = 'pending',
+            db.session.add(APITaskQueue(
+                platform  = 'pitch_machine',
+                task_type = 'generate_draft',
+                payload   = {
+                    'entry_type': 'queue_sheet',
+                    'item_name':  item_name,
+                    'pitch_type': item.pitch_type,
+                    'notes':      item.notes or '',
+                    'send_date':  item.send_date.isoformat() if item.send_date else None,
+                    'hubspot_id': item.hubspot_id or '',
+                },
+                created_by = current_user.id,
             ))
-            created += 1
+            queued += 1
 
     db.session.commit()
 
-    for err in errors:
-        flash(err, 'error')
-    if created:
+    if queued:
         flash(
-            f'{created} draft{"s" if created != 1 else ""} ready for review.',
+            f'{queued} draft{"s" if queued != 1 else ""} queued — click "Process drafts" to generate.',
             'success',
         )
+    return redirect(url_for('pitch_machine.draft_queue'))
 
-    return redirect(url_for('pitch_machine.review'))
+
+# ── Process one queued draft (called sequentially by frontend JS) ─────────────
+
+@pm_bp.route('/run-generate-next', methods=['POST'])
+@login_required
+@csrf.exempt
+def run_generate_next():
+    _require_access()
+    from datetime import datetime, timedelta
+    from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
+
+    # Reset tasks stuck in 'processing' for > 5 min (gateway timeout recovery)
+    stale_cutoff = datetime.utcnow() - timedelta(minutes=5)
+    stale = (
+        APITaskQueue.query
+        .filter_by(platform='pitch_machine', task_type='generate_draft', status='processing')
+        .filter(APITaskQueue.started_at < stale_cutoff)
+        .all()
+    )
+    for t in stale:
+        t.status      = 'pending'
+        t.retry_count += 1
+    if stale:
+        db.session.commit()
+
+    task = (
+        APITaskQueue.query
+        .filter_by(platform='pitch_machine', task_type='generate_draft', status='pending')
+        .filter(APITaskQueue.retry_count < APITaskQueue.max_retries)
+        .order_by(APITaskQueue.created_at)
+        .first()
+    )
+
+    if task is None:
+        return jsonify({'done': True, 'remaining': 0})
+
+    task.status     = 'processing'
+    task.started_at = datetime.utcnow()
+    db.session.commit()
+
+    payload    = task.payload or {}
+    entry_type = payload.get('entry_type', 'hubspot')
+    pitch_type = payload.get('pitch_type', 'Festival')
+
+    if entry_type == 'hubspot':
+        name        = payload.get('name', '')
+        website     = payload.get('website') or None
+        description = payload.get('description') or None
+        hubspot_id  = payload.get('hubspot_id', '')
+        send_date   = _parse_form_date(payload.get('send_date') or '')
+    else:
+        name        = payload.get('item_name', '')
+        website     = None
+        description = payload.get('notes') or None
+        hubspot_id  = payload.get('hubspot_id', '')
+        send_date   = _parse_form_date(payload.get('send_date') or '')
+
+    try:
+        draft = DraftGenerator(pitch_type=pitch_type).generate(
+            name=name, website=website, description=description,
+        )
+    except DraftGenerationError as e:
+        task.status        = 'failed'
+        task.error_message = str(e)
+        task.completed_at  = datetime.utcnow()
+        db.session.commit()
+        remaining = _pending_gen_count()
+        return jsonify({'done': remaining == 0, 'remaining': remaining, 'error': f'{name}: {e}'})
+
+    db.session.add(PitchApproval(
+        hubspot_contact_id = hubspot_id,
+        company_name       = name,
+        pitch_type         = pitch_type,
+        touch_number       = 1,
+        draft_subject      = draft.subject,
+        draft_body         = sanitize_body_html(draft.body),
+        research_notes     = draft.research_notes,
+        to_email           = _extract_email(draft.research_notes),
+        cc_email           = _DEFAULT_CC,
+        send_date          = send_date,
+        status             = 'pending',
+    ))
+    task.status       = 'completed'
+    task.completed_at = datetime.utcnow()
+    db.session.commit()
+
+    remaining = _pending_gen_count()
+    return jsonify({'done': remaining == 0, 'remaining': remaining, 'name': name})
 
 
 # ── Touch 1 review / approve ──────────────────────────────────────────────────────
@@ -701,6 +753,12 @@ def reject(pid: int):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────
+
+def _pending_gen_count() -> int:
+    return APITaskQueue.query.filter_by(
+        platform='pitch_machine', task_type='generate_draft', status='pending'
+    ).count()
+
 
 def _extract_email(*sources: Optional[str]) -> str:
     """
