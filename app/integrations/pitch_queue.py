@@ -97,10 +97,41 @@ def parse_queue(csv_content: str) -> list[QueueItem]:
     return items
 
 
-def serialize_queue(items: list[QueueItem]) -> str:
-    """Serialize queue items back to a CSV string."""
+def detect_fieldnames(csv_content: str) -> list[str]:
+    """
+    Return the column list to use when writing back a CSV that was just read.
+
+    Starts from the header row actually present in csv_content (preserving order
+    and any columns the current code doesn't know about), then appends any COLUMNS
+    entry that is missing (forward migration when a new column is added).
+
+    Pass the result to serialize_queue() so the write path is derived from what
+    was read rather than from the code's internal COLUMNS constant. This prevents
+    a server-restart gap from silently narrowing the schema on the next write.
+    """
+    reader = csv.DictReader(io.StringIO(csv_content))
+    existing = list(reader.fieldnames or [])
+    for col in COLUMNS:
+        if col not in existing:
+            existing.append(col)
+    return existing
+
+
+def serialize_queue(items: list[QueueItem], fieldnames: Optional[list[str]] = None) -> str:
+    """
+    Serialize queue items back to a CSV string.
+
+    fieldnames: column order for the output. Pass detect_fieldnames(original_content)
+    to preserve all columns from the source CSV. Omit only when constructing a
+    fresh file — defaults to COLUMNS in that case.
+    """
+    if fieldnames is None:
+        fieldnames = COLUMNS
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=COLUMNS, lineterminator='\n', extrasaction='ignore')
+    writer = csv.DictWriter(
+        out, fieldnames=fieldnames, lineterminator='\n',
+        extrasaction='ignore', restval='',
+    )
     writer.writeheader()
     for item in items:
         writer.writerow(item.to_row())

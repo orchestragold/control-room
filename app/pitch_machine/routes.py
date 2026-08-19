@@ -953,16 +953,22 @@ def _remove_from_queue_sheet(company_name: str) -> None:
         get_or_create_queue_csv,
         upload_file,
     )
-    from app.integrations.pitch_queue import QUEUE_PATH, parse_queue, serialize_queue
+    from app.integrations.pitch_queue import (
+        QUEUE_PATH, detect_fieldnames, parse_queue, serialize_queue,
+    )
     try:
-        items = parse_queue(get_or_create_queue_csv())
+        content = get_or_create_queue_csv()
+        # Derive fieldnames from the actual file header so no column is silently
+        # dropped if the running code's COLUMNS doesn't yet match the CSV schema.
+        fieldnames = detect_fieldnames(content)
+        items = parse_queue(content)
         changed = False
         for item in items:
             if item.name == company_name and item.status == 'queued':
                 item.status = 'pitched'
                 changed = True
         if changed:
-            upload_file(QUEUE_PATH, serialize_queue(items))
+            upload_file(QUEUE_PATH, serialize_queue(items, fieldnames=fieldnames))
     except Exception as e:
         import sys
         print(f'[queue sheet] remove failed for {company_name!r}: {e}', file=sys.stderr)
