@@ -479,12 +479,13 @@ def generate():
                 platform  = 'pitch_machine',
                 task_type = 'generate_draft',
                 payload   = {
-                    'entry_type': 'queue_sheet',
-                    'item_name':  item_name,
-                    'pitch_type': item.pitch_type,
-                    'notes':      item.notes or '',
-                    'send_date':  item.deadline.isoformat() if item.deadline else None,
-                    'hubspot_id': item.hubspot_id or '',
+                    'entry_type':    'queue_sheet',
+                    'item_name':     item_name,
+                    'pitch_type':    item.pitch_type,
+                    'notes':         item.notes or '',
+                    'send_date':     item.deadline.isoformat() if item.deadline else None,
+                    'hubspot_id':    item.hubspot_id or '',
+                    'email_address': item.email_address or '',
                 },
                 created_by = current_user.id,
             ))
@@ -568,6 +569,11 @@ def run_generate_next():
         remaining = _pending_gen_count()
         return jsonify({'done': remaining == 0, 'remaining': remaining, 'error': f'{name}: {e}'})
 
+    if entry_type == 'hubspot':
+        to_email = _extract_email(draft.research_notes)
+    else:
+        to_email = payload.get('email_address', '')
+
     db.session.add(PitchApproval(
         hubspot_contact_id = hubspot_id,
         company_name       = name,
@@ -576,7 +582,7 @@ def run_generate_next():
         draft_subject      = draft.subject,
         draft_body         = sanitize_body_html(draft.body),
         research_notes     = draft.research_notes,
-        to_email           = _extract_email(draft.research_notes),
+        to_email           = to_email,
         cc_email           = _DEFAULT_CC,
         send_date          = send_date,
         status             = 'pending',
