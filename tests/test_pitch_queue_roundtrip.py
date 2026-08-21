@@ -19,6 +19,7 @@ from app.integrations.pitch_queue import (
     detect_fieldnames,
     parse_queue,
     serialize_queue,
+    QueueItem,
 )
 
 # A minimal CSV that matches the current 9-column schema.
@@ -120,3 +121,80 @@ class TestSerializeQueueRoundtrip:
         items = parse_queue(_SAMPLE)
         out = serialize_queue(items, fieldnames=fieldnames)
         assert len(self._read_rows(out)) == 2
+
+
+# ── not_a_fit round-trip ─────────────────────────────────────────────────────
+
+class TestNotAFitRoundtrip:
+    """
+    Guards the new write path: mark a row not_a_fit, write back, verify the
+    full header and every cell survive unchanged.  Same failure mode as the
+    email_address data loss — a new column that didn't exist in the live CSV
+    must be forward-migrated by detect_fieldnames, not silently dropped.
+    """
+
+    def _read_header(self, csv_text: str) -> list[str]:
+        return list(csv.DictReader(io.StringIO(csv_text)).fieldnames or [])
+
+    def _read_rows(self, csv_text: str) -> list[dict]:
+        return list(csv.DictReader(io.StringIO(csv_text)))
+
+    def test_not_a_fit_status_and_reason_written(self):
+        """Mark a row not_a_fit with a reason; verify status, reason, and all other cells."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        for item in items:
+            if item.name == 'XRAY.fm':
+                item.status = 'not_a_fit'
+                item.not_a_fit_reason = 'classical presenter, not experimental'
+        out = serialize_queue(items, fieldnames=fieldnames)
+        rows = {r['name']: r for r in self._read_rows(out)}
+
+        assert rows['XRAY.fm']['status'] == 'not_a_fit'
+        assert rows['XRAY.fm']['not_a_fit_reason'] == 'classical presenter, not experimental'
+        # email survives
+        assert rows['XRAY.fm']['email_address'] == 'theo@xray.fm'
+        # untouched row is intact
+        assert rows['KBOO 90.7 FM']['status'] == 'queued'
+        assert rows['KBOO 90.7 FM']['email_address'] == 'news@kboo.fm'
+
+    def test_not_a_fit_header_includes_new_column(self):
+        """not_a_fit_reason column appears in the header after forward migration."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        out = serialize_queue(items, fieldnames=fieldnames)
+        assert 'not_a_fit_reason' in self._read_header(out)
+
+    def test_not_a_fit_on_old_schema_csv(self):
+        """Old 8-column CSV: not_a_fit_reason is forward-migrated and written correctly."""
+        fieldnames = detect_fieldnames(_OLD_SCHEMA)
+        items = parse_queue(_OLD_SCHEMA)
+        for item in items:
+            item.status = 'not_a_fit'
+            item.not_a_fit_reason = 'govt office, not a buyer'
+        out = serialize_queue(items, fieldnames=fieldnames)
+        header = self._read_header(out)
+        rows = self._read_rows(out)
+        assert 'not_a_fit_reason' in header
+        assert 'email_address' in header
+        assert rows[0]['not_a_fit_reason'] == 'govt office, not a buyer'
+
+    def test_empty_reason_is_allowed(self):
+        """Reason is optional — blank string must round-trip cleanly."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        for item in items:
+            if item.name == 'XRAY.fm':
+                item.status = 'not_a_fit'
+                item.not_a_fit_reason = ''
+        out = serialize_queue(items, fieldnames=fieldnames)
+        rows = {r['name']: r for r in self._read_rows(out)}
+        assert rows['XRAY.fm']['status'] == 'not_a_fit'
+        assert rows['XRAY.fm']['not_a_fit_reason'] == ''
+        assert rows['XRAY.fm']['email_address'] == 'theo@xray.fm'
+
+    def test_all_columns_survive_not_a_fit_write(self):
+        """detect_fieldnames output is a superset of COLUMNS after not_a_fit path."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        for col in COLUMNS:
+            assert col in fieldnames, f'COLUMNS entry {col!r} missing after not_a_fit detect'

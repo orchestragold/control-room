@@ -143,8 +143,18 @@ def _build_queue(companies: list) -> list[QueueEntry]:
         if a.company_name
     }
 
+    # Names permanently excluded — even if a research task later adds a fresh queued row
+    # with the same name, the not_a_fit record blocks re-emergence in the Portal.
+    not_a_fit_names: set[str] = {
+        item.name.lower()
+        for item in queue_items
+        if item.status == 'not_a_fit'
+    }
+
     for item in queue_items:
         if item.status != 'queued':
+            continue
+        if item.name.lower() in not_a_fit_names:
             continue
         if not item.deadline or item.deadline < today:
             continue
@@ -763,6 +773,41 @@ def reject(pid: int):
     return redirect(url_for('pitch_machine.review'))
 
 
+@pm_bp.route('/not-a-fit/<int:pid>', methods=['POST'])
+@login_required
+def not_a_fit(pid: int):
+    _require_access()
+
+    approval = PitchApproval.query.get_or_404(pid)
+    if approval.status != 'pending':
+        flash('This draft is no longer pending.', 'error')
+        return redirect(url_for('pitch_machine.review'))
+
+    reason = request.form.get('reason', '').strip()
+
+    approval.status = 'rejected'
+    db.session.add(ApprovalLog(
+        approver_id = current_user.id,
+        action      = 'not_a_fit',
+        entity_type = 'pitch_approval',
+        entity_id   = str(pid),
+        details     = {
+            'company_name': approval.company_name,
+            'pitch_type':   approval.pitch_type,
+            'reason':       reason,
+        },
+    ))
+    db.session.commit()
+
+    _mark_queue_sheet_not_a_fit(approval.company_name, reason)
+
+    msg = f'{approval.company_name} marked not a fit and removed from queue.'
+    if reason:
+        msg += f' Reason: {reason}'
+    flash(msg, 'success')
+    return redirect(url_for('pitch_machine.review'))
+
+
 # ── Pitch type config admin (super_admin only) ───────────────────────────────────
 
 def _require_super_admin():
@@ -972,6 +1017,33 @@ def _remove_from_queue_sheet(company_name: str) -> None:
     except Exception as e:
         import sys
         print(f'[queue sheet] remove failed for {company_name!r}: {e}', file=sys.stderr)
+
+
+def _mark_queue_sheet_not_a_fit(company_name: str, reason: str) -> None:
+    """Mark a queue item as 'not_a_fit' with an optional reason and rewrite the CSV."""
+    from app.integrations.dropbox_sync import (
+        DropboxError,
+        get_or_create_queue_csv,
+        upload_file,
+    )
+    from app.integrations.pitch_queue import (
+        QUEUE_PATH, detect_fieldnames, parse_queue, serialize_queue,
+    )
+    try:
+        content = get_or_create_queue_csv()
+        fieldnames = detect_fieldnames(content)
+        items = parse_queue(content)
+        changed = False
+        for item in items:
+            if item.name == company_name and item.status == 'queued':
+                item.status = 'not_a_fit'
+                item.not_a_fit_reason = reason
+                changed = True
+        if changed:
+            upload_file(QUEUE_PATH, serialize_queue(items, fieldnames=fieldnames))
+    except Exception as e:
+        import sys
+        print(f'[queue sheet] not_a_fit write failed for {company_name!r}: {e}', file=sys.stderr)
 
 
 def _write_hubspot_reach_out_1(hubspot_id: str, send_date: Optional[date]) -> Optional[str]:

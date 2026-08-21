@@ -214,6 +214,12 @@
     transition: border-color 0.1s, color 0.1s;
   }
   .btn-reject:hover { border-color: #5a1010; color: #f87171; }
+  .btn-not-a-fit {
+    background: none; border: 1px solid #1e1a10; color: #6a5a2a;
+    font-size: 13px; padding: 7px 14px; border-radius: 3px; cursor: pointer;
+    transition: border-color 0.1s, color 0.1s;
+  }
+  .btn-not-a-fit:hover { border-color: #5a4010; color: #c8a050; }
 
   /* ── Right: research brief ───────────────────────────────────────────────────── */
 
@@ -367,6 +373,12 @@
                   data-reject-url="{{ url_for('pitch_machine.reject', pid=draft.id) }}">
             reject
           </button>
+          {% if not draft.hubspot_contact_id %}
+          <button type="button" class="btn-not-a-fit"
+                  data-not-a-fit-url="{{ url_for('pitch_machine.not_a_fit', pid=draft.id) }}">
+            not a good fit
+          </button>
+          {% endif %}
         </div>
 
       </form>
@@ -485,6 +497,25 @@
     btn.addEventListener('click', function () {
       if (!confirm('Reject this draft? The item stays in the queue for re-drafting.')) return;
       postForm(btn.dataset.rejectUrl);
+    });
+  });
+
+  // Not a good fit — rejects draft and removes target from queue permanently
+  document.querySelectorAll('.btn-not-a-fit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var reason = prompt('Reason (optional — press Enter to skip):');
+      if (reason === null) return; // user clicked Cancel
+      var f = document.createElement('form');
+      f.method = 'post';
+      f.action = btn.dataset.notAFitUrl;
+      var tok = document.createElement('input');
+      tok.type = 'hidden'; tok.name = 'csrf_token'; tok.value = csrfToken;
+      f.appendChild(tok);
+      var r = document.createElement('input');
+      r.type = 'hidden'; r.name = 'reason'; r.value = reason;
+      f.appendChild(r);
+      document.body.appendChild(f);
+      f.submit();
     });
   });
 

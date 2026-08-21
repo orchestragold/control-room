@@ -40,49 +40,53 @@ QUEUE_PATH = '/pitch_queue.csv'
 COLUMNS = [
     'name', 'pitch_type', 'source', 'deadline',
     'status', 'notes', 'date_added', 'hubspot_id', 'email_address',
+    'not_a_fit_reason',
 ]
 
 PITCH_TYPES = ('Festival', 'WAA', 'Show Invite', 'PNW', 'Distribution')
-STATUSES    = ('queued', 'pitched', 'removed')
+STATUSES    = ('queued', 'pitched', 'removed', 'not_a_fit')
 
 
 @dataclass
 class QueueItem:
-    name:          str
-    pitch_type:    str            = 'Festival'
-    source:        str            = 'cowork'
-    deadline:      Optional[date] = None
-    status:        str            = 'queued'
-    notes:         str            = ''
-    date_added:    str            = ''
-    hubspot_id:    str            = ''
-    email_address: str            = ''
+    name:              str
+    pitch_type:        str            = 'Festival'
+    source:            str            = 'cowork'
+    deadline:          Optional[date] = None
+    status:            str            = 'queued'
+    notes:             str            = ''
+    date_added:        str            = ''
+    hubspot_id:        str            = ''
+    email_address:     str            = ''
+    not_a_fit_reason:  str            = ''
 
     @classmethod
     def from_row(cls, row: dict) -> 'QueueItem':
         return cls(
-            name          = row.get('name', '').strip(),
-            pitch_type    = row.get('pitch_type', 'Festival').strip() or 'Festival',
-            source        = row.get('source', 'cowork').strip(),
-            deadline      = _parse_date(row.get('deadline', '')),
-            status        = row.get('status', 'queued').strip(),
-            notes         = row.get('notes', '').strip(),
-            date_added    = row.get('date_added', '').strip(),
-            hubspot_id    = row.get('hubspot_id', '').strip(),
-            email_address = row.get('email_address', '').strip(),
+            name             = row.get('name', '').strip(),
+            pitch_type       = row.get('pitch_type', 'Festival').strip() or 'Festival',
+            source           = row.get('source', 'cowork').strip(),
+            deadline         = _parse_date(row.get('deadline', '')),
+            status           = row.get('status', 'queued').strip(),
+            notes            = row.get('notes', '').strip(),
+            date_added       = row.get('date_added', '').strip(),
+            hubspot_id       = row.get('hubspot_id', '').strip(),
+            email_address    = row.get('email_address', '').strip(),
+            not_a_fit_reason = row.get('not_a_fit_reason', '').strip(),
         )
 
     def to_row(self) -> dict:
         return {
-            'name':          self.name,
-            'pitch_type':    self.pitch_type,
-            'source':        self.source,
-            'deadline':      self.deadline.isoformat() if self.deadline else '',
-            'status':        self.status,
-            'notes':         self.notes,
-            'date_added':    self.date_added or _now_iso(),
-            'hubspot_id':    self.hubspot_id,
-            'email_address': self.email_address,
+            'name':             self.name,
+            'pitch_type':       self.pitch_type,
+            'source':           self.source,
+            'deadline':         self.deadline.isoformat() if self.deadline else '',
+            'status':           self.status,
+            'notes':            self.notes,
+            'date_added':       self.date_added or _now_iso(),
+            'hubspot_id':       self.hubspot_id,
+            'email_address':    self.email_address,
+            'not_a_fit_reason': self.not_a_fit_reason,
         }
 
 
