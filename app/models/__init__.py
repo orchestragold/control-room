@@ -5,6 +5,7 @@ from .pitch import PitchApproval
 from .knowledge import WarmContact, DropboxSync
 from .hubspot_cache import HubSpotCompany
 from .pitch_config import PitchTypeConfig
+from .pitch_target import PitchTarget
 
 __all__ = [
     'User',
@@ -22,4 +23,5 @@ __all__ = [
     'DropboxSync',
     'HubSpotCompany',
     'PitchTypeConfig',
+    'PitchTarget',
 ]

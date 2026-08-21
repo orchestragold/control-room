@@ -60,6 +60,19 @@ def create_app(config_class=Config):
         except HubSpotError as e:
             print(f'Error: {e}')
 
+    @app.cli.command('sync-pitch-targets')
+    def sync_pitch_targets_command():
+        """Rebuild pitch_targets from HubSpot cache, spreadsheet XLSX, and queue CSV."""
+        from app.pitch_machine.pitch_target_sync import sync_pitch_targets
+        try:
+            result = sync_pitch_targets()
+            print(str(result))
+            for w in result.warnings:
+                print(f'  WARNING: {w}')
+        except Exception as e:
+            print(f'Error: {e}')
+            raise
+
     @app.cli.command('process-queue')
     def process_queue_command():
         """Process pending zoho_mail send tasks. Run by cron every few minutes."""

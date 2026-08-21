@@ -225,6 +225,46 @@ CREATE TABLE IF NOT EXISTS pitch_type_configs (
     KEY idx_ptc_active_sort (active, sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── Session G-1: pitch_targets materialized sync table ─────────────────────
+-- db.create_all() on startup creates this automatically on fresh installs.
+-- Run manually on production after pulling the G-1 commit, before restarting.
+CREATE TABLE IF NOT EXISTS pitch_targets (
+    id                  INT UNSIGNED  AUTO_INCREMENT PRIMARY KEY,
+    hubspot_id          VARCHAR(50),
+    name                VARCHAR(500)  NOT NULL,
+
+    source_hubspot      TINYINT(1)    NOT NULL DEFAULT 0,
+    source_spreadsheet  TINYINT(1)    NOT NULL DEFAULT 0,
+    source_queue_csv    TINYINT(1)    NOT NULL DEFAULT 0,
+
+    stage               VARCHAR(50)   NOT NULL DEFAULT 'needs-outreach',
+    stage_conflict      TINYINT(1)    NOT NULL DEFAULT 0,
+    conflict_note       VARCHAR(500),
+
+    pitch_type          VARCHAR(100),
+    website             VARCHAR(500),
+    description         TEXT,
+    reach_out_1         DATE,
+    submission_deadline DATE,
+
+    spreadsheet_status  VARCHAR(500),
+    spreadsheet_row     INT,
+    hs_lead_status      VARCHAR(100),
+    queue_csv_status    VARCHAR(50),
+
+    email_address       VARCHAR(500),
+    not_a_fit           TINYINT(1)    NOT NULL DEFAULT 0,
+    not_a_fit_reason    VARCHAR(500),
+
+    last_synced_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_pt_hubspot_id (hubspot_id),
+    KEY idx_pt_stage      (stage),
+    KEY idx_pt_name       (name(100)),
+    KEY idx_pt_not_a_fit  (not_a_fit),
+    KEY idx_pt_hubspot_id (hubspot_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Session E migration: pitch_type column on pitch_approvals ───────────────
 -- ALTER TABLE pitch_approvals
 --   ADD COLUMN IF NOT EXISTS pitch_type VARCHAR(50) NOT NULL DEFAULT 'Festival'
