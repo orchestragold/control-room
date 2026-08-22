@@ -1,5 +1,5 @@
 """
-Tests for the approve() route — covers C3 from the code review.
+Tests for the approve(), reject(), and not_a_fit() routes.
 
 C3: Dropbox and HubSpot writes must happen AFTER db.session.commit().
 Before the fix, the writes happened before the commit. If the commit
@@ -13,7 +13,8 @@ process-queue will send the email.
 from unittest.mock import patch, MagicMock, call
 
 
-APPROVE_URL = '/projects/orchestra-gold/pitch-machine/approve/{pid}'
+APPROVE_URL   = '/projects/orchestra-gold/pitch-machine/approve/{pid}'
+NOT_A_FIT_URL = '/projects/orchestra-gold/pitch-machine/not-a-fit/{pid}'
 APPROVE_FORM = {
     'subject':    'Test Subject',
     'body':       '<p>Test body</p>',
@@ -147,3 +148,100 @@ class TestC3ApproveOrdering:
             "If external writes come first, a commit failure would leave "
             "Dropbox/HubSpot out of sync with no send task created."
         )
+
+
+# ── not_a_fit route HTTP seam tests ──────────────────────────────────────────
+
+class TestNotAFit:
+    """
+    HTTP seam tests for POST /not-a-fit/<pid>.
+
+    The not_a_fit route was added in the same batch as the email_address
+    column work and G-1.  It has the same failure mode as the 405 bug —
+    invisible until something breaks — so these tests exercise the full
+    HTTP → DB path rather than calling _mark_queue_sheet_not_a_fit directly.
+    """
+
+    def test_route_accepts_post_and_marks_rejected(self, app, db, client):
+        """The route returns 302 and sets approval.status='rejected'."""
+        from app.models.pitch import PitchApproval
+
+        pid = _make_pending_approval(app, db)
+
+        with patch('app.pitch_machine.routes._mark_queue_sheet_not_a_fit'):
+            response = client.post(
+                NOT_A_FIT_URL.format(pid=pid),
+                data={'reason': 'too classical for our sound'},
+            )
+
+        assert response.status_code in (200, 302), (
+            f"Expected redirect (302) or 200, got {response.status_code}. "
+            "If 405: route method not wired correctly. "
+            "If 404: blueprint URL prefix mismatch."
+        )
+
+        with app.app_context():
+            approval = db.session.get(PitchApproval, pid)
+            assert approval.status == 'rejected', (
+                f"approval.status={approval.status!r}, expected 'rejected'. "
+                "not_a_fit sets status='rejected' (not a separate enum value)."
+            )
+
+    def test_approval_log_recorded_with_reason(self, app, db, client):
+        """ApprovalLog entry is written with action='not_a_fit' and the reason."""
+        from app.models.queue import ApprovalLog
+
+        pid = _make_pending_approval(app, db)
+
+        with patch('app.pitch_machine.routes._mark_queue_sheet_not_a_fit'):
+            client.post(
+                NOT_A_FIT_URL.format(pid=pid),
+                data={'reason': 'too classical for our sound'},
+            )
+
+        with app.app_context():
+            log = ApprovalLog.query.filter_by(
+                entity_type='pitch_approval',
+                entity_id=str(pid),
+                action='not_a_fit',
+            ).first()
+            assert log is not None, "No ApprovalLog row with action='not_a_fit'"
+            assert log.details['reason'] == 'too classical for our sound'
+
+    def test_queue_sheet_update_called_with_name_and_reason(self, app, db, client):
+        """_mark_queue_sheet_not_a_fit is called with the company name and reason."""
+        pid = _make_pending_approval(app, db)
+        called_with = []
+
+        def spy(company_name, reason):
+            called_with.append((company_name, reason))
+
+        with patch('app.pitch_machine.routes._mark_queue_sheet_not_a_fit',
+                   side_effect=spy):
+            client.post(
+                NOT_A_FIT_URL.format(pid=pid),
+                data={'reason': 'too classical for our sound'},
+            )
+
+        assert called_with == [('Test Festival', 'too classical for our sound')], (
+            f"_mark_queue_sheet_not_a_fit called with: {called_with}"
+        )
+
+    def test_already_processed_approval_is_rejected(self, app, db, client):
+        """Route must refuse to process a non-pending approval (flash + redirect)."""
+        from app.models.pitch import PitchApproval
+
+        pid = _make_pending_approval(app, db)
+        with app.app_context():
+            approval = db.session.get(PitchApproval, pid)
+            approval.status = 'rejected'
+            db.session.commit()
+
+        with patch('app.pitch_machine.routes._mark_queue_sheet_not_a_fit') as mock_csv:
+            response = client.post(
+                NOT_A_FIT_URL.format(pid=pid),
+                data={'reason': 'late attempt'},
+            )
+
+        assert response.status_code in (200, 302)
+        mock_csv.assert_not_called()
