@@ -493,15 +493,17 @@ def create_app(config_class=Config):
             pitch_type = payload.get('pitch_type', 'Festival')
 
             if entry_type == 'hubspot':
-                name        = payload.get('name', '')
-                website     = payload.get('website') or None
-                description = payload.get('description') or None
-                hubspot_id  = payload.get('hubspot_id', '')
+                name          = payload.get('name', '')
+                website       = payload.get('website') or None
+                description   = payload.get('description') or None
+                hubspot_id    = payload.get('hubspot_id', '')
+                email_address = ''
             else:
-                name        = payload.get('item_name', '')
-                website     = None
-                description = payload.get('notes') or None
-                hubspot_id  = payload.get('hubspot_id', '')
+                name          = payload.get('item_name', '')
+                website       = None
+                description   = payload.get('notes') or None
+                hubspot_id    = payload.get('hubspot_id', '')
+                email_address = payload.get('email_address', '')
 
             send_date = _parse_date(payload.get('send_date') or '')
 
@@ -526,7 +528,7 @@ def create_app(config_class=Config):
                 draft_subject      = draft.subject,
                 draft_body         = sanitize_body_html(draft.body),
                 research_notes     = draft.research_notes,
-                to_email           = _first_email(draft.research_notes),
+                to_email           = email_address or _first_email(draft.research_notes),
                 cc_email           = _CC,
                 send_date          = send_date,
                 status             = 'pending',
