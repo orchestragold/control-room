@@ -84,12 +84,17 @@ def normalize_name(name: str) -> str:
 
 # ── Stage mapping ─────────────────────────────────────────────────────────────
 
-def spreadsheet_status_to_stage(raw: Optional[str]) -> str:
+def spreadsheet_status_to_stage(raw: Optional[str]) -> Optional[str]:
     """
     Map a raw spreadsheet Status value to a PMStage string.
 
-    Unrecognized values → NEEDS_OUTREACH (never raise; the spreadsheet is
-    continuously edited and will grow new free-text Status values over time).
+    Returns None for unrecognized values — the spreadsheet Status column carries
+    research-workflow notes ('Buyer Named - Generic Contact Only', etc.) that are
+    not stage signals. Returning None lets compute_stage treat an unmappable
+    status as 'no signal' rather than 'says NEEDS_OUTREACH', which eliminates
+    false conflicts with HubSpot.
+
+    Callers must treat None as 'skip conflict detection for this source'.
     """
     if not raw:
         return PMStage.NEEDS_OUTREACH.value
@@ -102,7 +107,7 @@ def spreadsheet_status_to_stage(raw: Optional[str]) -> str:
         return PMStage.DEPRIORITIZED.value
     if s.startswith('INACTIVE'):
         return PMStage.DECLINED.value
-    return PMStage.NEEDS_OUTREACH.value
+    return None  # unmappable — not a conflict signal
 
 
 def csv_status_to_stage(raw: Optional[str]) -> str:
@@ -283,7 +288,9 @@ def compute_stage(record: dict) -> None:
 
         if has_ss and record.get('spreadsheet_status'):
             ss_stage = spreadsheet_status_to_stage(record['spreadsheet_status'])
-            if ss_stage != canonical:
+            # ss_stage is None when the spreadsheet value is unmappable (research
+            # workflow notes, etc.) — not a conflict signal, skip comparison.
+            if ss_stage is not None and ss_stage != canonical:
                 conflict_parts.append(
                     f"Spreadsheet: {record['spreadsheet_status']!r}; "
                     f"HubSpot: {record.get('hs_lead_status')!r}"
@@ -307,23 +314,26 @@ def compute_stage(record: dict) -> None:
 
     if has_ss and record.get('spreadsheet_status'):
         ss_stage = spreadsheet_status_to_stage(record['spreadsheet_status'])
-        record['stage'] = ss_stage
-
-        if has_csv and record.get('queue_csv_status'):
-            csv_stage = csv_status_to_stage(record['queue_csv_status'])
-            if csv_stage != ss_stage:
-                record['stage_conflict'] = True
-                record['conflict_note']  = (
-                    f"Spreadsheet: {record['spreadsheet_status']!r}; "
-                    f"Queue CSV: {record['queue_csv_status']!r}"
-                )[:500]
+        if ss_stage is not None:
+            # Spreadsheet provides a mappable stage — use it, check for CSV conflict.
+            record['stage'] = ss_stage
+            if has_csv and record.get('queue_csv_status'):
+                csv_stage = csv_status_to_stage(record['queue_csv_status'])
+                if csv_stage != ss_stage:
+                    record['stage_conflict'] = True
+                    record['conflict_note']  = (
+                        f"Spreadsheet: {record['spreadsheet_status']!r}; "
+                        f"Queue CSV: {record['queue_csv_status']!r}"
+                    )[:500]
+                else:
+                    record['stage_conflict'] = False
+                    record['conflict_note']  = None
             else:
                 record['stage_conflict'] = False
                 record['conflict_note']  = None
-        else:
-            record['stage_conflict'] = False
-            record['conflict_note']  = None
-        return
+            return
+        # ss_stage is None: spreadsheet status is unmappable — fall through to
+        # CSV or NEEDS_OUTREACH rather than asserting a false stage.
 
     if has_csv and record.get('queue_csv_status'):
         record['stage']          = csv_status_to_stage(record['queue_csv_status'])

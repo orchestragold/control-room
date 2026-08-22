@@ -100,10 +100,13 @@ class TestSpreadsheetStatusToStage:
     def test_inactive_with_suffix(self):
         assert spreadsheet_status_to_stage('INACTIVE - venue closed') == PMStage.DECLINED.value
 
-    def test_unrecognized_falls_through(self):
-        # New free-text Status values land in NEEDS_OUTREACH, not an exception
-        assert spreadsheet_status_to_stage('Research Phase') == PMStage.NEEDS_OUTREACH.value
-        assert spreadsheet_status_to_stage('TBD') == PMStage.NEEDS_OUTREACH.value
+    def test_unrecognized_returns_none(self):
+        # Free-text research-workflow notes are unmappable — return None (not
+        # NEEDS_OUTREACH) so compute_stage can treat them as 'no signal' rather
+        # than 'says NEEDS_OUTREACH', eliminating false conflicts with HubSpot.
+        assert spreadsheet_status_to_stage('Research Phase') is None
+        assert spreadsheet_status_to_stage('TBD') is None
+        assert spreadsheet_status_to_stage('Buyer Named - Generic Contact Only') is None
 
     def test_empty_string(self):
         assert spreadsheet_status_to_stage('') == PMStage.NEEDS_OUTREACH.value
@@ -390,6 +393,51 @@ class TestSyncRoundtrip:
             assert t.conflict_note  is not None
             assert 'Pitch Sent' in t.conflict_note
             assert 'NEW' in t.conflict_note
+
+    def test_unmappable_spreadsheet_does_not_conflict_with_hubspot(self, app, db):
+        """
+        Free-text spreadsheet Status values ('Buyer Named - Generic Contact Only'
+        etc.) that match no known prefix must NOT generate a stage conflict.
+        Only genuinely contradictory signals ('Pitch Sent' vs HubSpot NEW) should.
+        This is the fix for the 32-conflict → ~4-real-conflict problem.
+        """
+        with app.app_context():
+            db.session.add(_make_company(
+                hubspot_id     = 'hs-noconflict',
+                name           = 'Research Phase Festival',
+                hs_lead_status = 'NEW',
+                reach_out_1    = None,
+            ))
+            db.session.commit()
+
+            xlsx = _make_xlsx([
+                ['Festival Name', 'Status', 'HubSpot Linked'],
+                ['Research Phase Festival', 'Buyer Named - Generic Contact Only',
+                 'Yes (hs-noconflict)'],
+            ])
+            sync_pitch_targets(xlsx_bytes=xlsx, csv_content=_EMPTY_CSV)
+
+            t = PitchTarget.query.filter_by(hubspot_id='hs-noconflict').first()
+            assert t.stage          == PMStage.QUEUED.value   # HubSpot wins
+            assert t.stage_conflict is False                   # unmappable ≠ conflict
+            assert t.conflict_note  is None
+
+    def test_unmappable_spreadsheet_csv_stage_wins(self, app, db):
+        """
+        No HubSpot. Spreadsheet status unmappable. CSV says queued.
+        CSV stage should win (QUEUED), not NEEDS_OUTREACH, and no conflict.
+        """
+        with app.app_context():
+            xlsx = _make_xlsx([
+                ['Festival Name', 'Status'],
+                ['TBD Festival', 'Research Phase'],
+            ])
+            csv = _EMPTY_CSV + 'TBD Festival,Festival,cowork,2026-12-01,queued,,2026-08-20,,,\n'
+            sync_pitch_targets(xlsx_bytes=xlsx, csv_content=csv)
+
+            t = PitchTarget.query.filter_by(name='TBD Festival').first()
+            assert t.stage          == PMStage.QUEUED.value
+            assert t.stage_conflict is False
 
     def test_name_based_dedup_merges_csv_into_hs_record(self, app, db):
         """CSV item with no hubspot_id merges with HubSpot record by exact name match."""
