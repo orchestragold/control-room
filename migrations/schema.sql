@@ -261,8 +261,7 @@ CREATE TABLE IF NOT EXISTS pitch_targets (
     UNIQUE KEY uq_pt_hubspot_id (hubspot_id),
     KEY idx_pt_stage      (stage),
     KEY idx_pt_name       (name(100)),
-    KEY idx_pt_not_a_fit  (not_a_fit),
-    KEY idx_pt_hubspot_id (hubspot_id)
+    KEY idx_pt_not_a_fit  (not_a_fit)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Session E migration: pitch_type column on pitch_approvals ───────────────

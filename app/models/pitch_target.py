@@ -51,8 +51,9 @@ class PitchTarget(db.Model):
     last_synced_at      = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
-        db.Index('idx_pt_stage',      'stage'),
-        db.Index('idx_pt_name',       'name'),
-        db.Index('idx_pt_not_a_fit',  'not_a_fit'),
-        db.Index('idx_pt_hubspot_id', 'hubspot_id'),
+        db.Index('idx_pt_stage',     'stage'),
+        db.Index('idx_pt_name',      'name'),
+        db.Index('idx_pt_not_a_fit', 'not_a_fit'),
+        # hubspot_id: no separate index needed — the unique=True above already
+        # creates one. A redundant KEY here wastes space without benefit.
     )
