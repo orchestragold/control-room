@@ -33,7 +33,7 @@ from app.pitch_machine.pitch_target_sync import (
     spreadsheet_status_to_stage,
     sync_pitch_targets,
 )
-from app.pitch_machine.stages import PMStage
+from app.pitch_machine.stages import PMStage, get_stage
 
 # ── Fixture helpers ───────────────────────────────────────────────────────────
 
@@ -171,6 +171,52 @@ class TestNormalizeName:
 
     def test_mixed_case(self):
         assert normalize_name('Primavera Sound') == 'primavera sound'
+
+
+# ── get_stage / derive_hs_stage parity ───────────────────────────────────────
+
+class TestGetStageDeriveHsStageParity:
+    """
+    get_stage (kanban board) and derive_hs_stage (pitch_targets sync) must
+    agree on every hs_lead_status value. If one is changed, the test fails,
+    forcing the other to be updated at the same time.
+
+    These functions cannot share an implementation without a larger refactor,
+    so this test is the enforcement mechanism.
+    """
+
+    _KNOWN_STATUSES = [
+        'ATTEMPTED_TO_CONTACT',
+        'CONNECTED',
+        'BAD_TIMING',
+        'UNQUALIFIED',
+        'OPEN_DEAL',
+        'OPEN',
+        'IN_PROGRESS',
+        'NEW',
+        None,
+    ]
+
+    def test_all_statuses_agree_without_reach_out_1(self, app):
+        with app.app_context():
+            for status in self._KNOWN_STATUSES:
+                company    = _make_company(hs_lead_status=status, reach_out_1=None)
+                board      = get_stage(company)
+                sync_stage = derive_hs_stage(status, None)
+                assert board is not None, f"get_stage returned None for {status!r}"
+                assert board.value == sync_stage, (
+                    f"hs_lead_status={status!r}: "
+                    f"get_stage={board.value!r} but derive_hs_stage={sync_stage!r}. "
+                    "Update both functions together."
+                )
+
+    def test_none_status_with_reach_out_1_both_return_queued(self, app):
+        from datetime import date
+        with app.app_context():
+            company    = _make_company(hs_lead_status=None, reach_out_1=date(2026, 9, 1))
+            board      = get_stage(company)
+            sync_stage = derive_hs_stage(None, date(2026, 9, 1))
+            assert board.value == sync_stage == PMStage.QUEUED.value
 
 
 # ── Spreadsheet XLSX parsing (no DB) ─────────────────────────────────────────
