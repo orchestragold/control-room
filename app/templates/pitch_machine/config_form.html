@@ -136,6 +136,27 @@
     </div>
 
     <div class="field">
+      <label>Recurrence shape</label>
+      <div style="display:flex;gap:0;margin-top:4px;">
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid #2a2a2a;border-right:none;cursor:pointer;background:{{ '#1a2e1a' if form.get('is_cyclical','1') != '0' else '#0d0d0d' }}" id="lbl-cyclical">
+          <input type="radio" name="is_cyclical" value="1" id="r-cyclical"
+                 {{ 'checked' if form.get('is_cyclical','1') != '0' else '' }}
+                 onchange="updateRecurrenceLabels()"
+                 style="display:none;">
+          <span style="font-size:12px;">◯ Cyclical</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid #2a2a2a;cursor:pointer;background:{{ '#1a2e1a' if form.get('is_cyclical','1') == '0' else '#0d0d0d' }}" id="lbl-oneoff">
+          <input type="radio" name="is_cyclical" value="0" id="r-oneoff"
+                 {{ 'checked' if form.get('is_cyclical','1') == '0' else '' }}
+                 onchange="updateRecurrenceLabels()"
+                 style="display:none;">
+          <span style="font-size:12px;">— One-off</span>
+        </label>
+      </div>
+      <div class="field-hint">Cyclical = annual return → renders the Wheel. One-off = tied to specific dates → renders the linear timeline.</div>
+    </div>
+
+    <div class="field">
       <label for="prompt_template">Prompt template</label>
       <textarea id="prompt_template" name="prompt_template"
                 placeholder="Draft a Touch 1 ... pitch for the following target.&#10;&#10;Target: {name}&#10;Website: {website}&#10;Notes: {description}&#10;&#10;...">{{ form.get('prompt_template', '') }}</textarea>
@@ -174,6 +195,12 @@ document.getElementById('name') && document.getElementById('name').addEventListe
 function checkNameChange(input) {
   var warn = document.getElementById('name-warning');
   if (warn) warn.style.display = (input.value !== _originalName) ? 'block' : 'none';
+}
+
+function updateRecurrenceLabels() {
+  var cyclical = document.getElementById('r-cyclical').checked;
+  document.getElementById('lbl-cyclical').style.background = cyclical ? '#1a2e1a' : '#0d0d0d';
+  document.getElementById('lbl-oneoff').style.background   = cyclical ? '#0d0d0d' : '#1a2e1a';
 }
 </script>
 {% endblock %}

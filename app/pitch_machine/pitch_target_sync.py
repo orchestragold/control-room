@@ -170,6 +170,7 @@ def _blank(name: str = '') -> dict:
         'spreadsheet_status':  None,
         'spreadsheet_row':     None,
         'hs_lead_status':      None,
+        'hubspot_owner_id':    None,
         'queue_csv_status':    None,
         'email_address':       None,
         'not_a_fit':           False,
@@ -232,12 +233,13 @@ class _MergeState:
 # ── Source-specific apply functions ──────────────────────────────────────────
 
 def _apply_hubspot(record: dict, company: HubSpotCompany) -> None:
-    record['source_hubspot'] = True
-    record['hs_lead_status'] = company.hs_lead_status
+    record['source_hubspot']   = True
+    record['hs_lead_status']   = company.hs_lead_status
+    record['hubspot_owner_id'] = company.hubspot_owner_id
     # HubSpot wins on these fields; only fill blanks for the others
-    record['website']        = record['website']     or company.website
-    record['description']    = record['description'] or company.description
-    record['reach_out_1']    = record['reach_out_1'] or company.reach_out_1
+    record['website']          = record['website']     or company.website
+    record['description']      = record['description'] or company.description
+    record['reach_out_1']      = record['reach_out_1'] or company.reach_out_1
     if not record['pitch_type']:
         record['pitch_type'] = 'Festival'
 

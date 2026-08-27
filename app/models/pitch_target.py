@@ -41,6 +41,7 @@ class PitchTarget(db.Model):
     spreadsheet_status  = db.Column(db.String(500), nullable=True)
     spreadsheet_row     = db.Column(db.Integer,     nullable=True)
     hs_lead_status      = db.Column(db.String(100), nullable=True)
+    hubspot_owner_id    = db.Column(db.String(50),  nullable=True)
     queue_csv_status    = db.Column(db.String(50),  nullable=True)
 
     # Queue CSV fields

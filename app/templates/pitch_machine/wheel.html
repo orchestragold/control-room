@@ -1,0 +1,467 @@
+{% extends 'base.html' %}
+{% block title %}Wheel — Pitch Machine{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .wh-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 14px; flex-wrap: wrap; gap: 10px;
+  }
+  .wh-title { font-size: 20px; font-weight: 300; color: #e0d09e; }
+  .wh-back  { font-size: 13px; color: #888; text-decoration: none; }
+  .wh-back:hover { color: #ccc; }
+
+  .wh-controls {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 0 14px; flex-wrap: wrap; gap: 10px;
+  }
+
+  .seg { display: flex; gap: 0; }
+  .seg button {
+    font-size: 10px; letter-spacing: .20em; text-transform: uppercase;
+    background: none; border: 1px solid #2a2a2a; border-right: none;
+    color: #888; padding: 7px 14px; cursor: pointer; font-family: inherit;
+  }
+  .seg button:last-child { border-right: 1px solid #2a2a2a; }
+  .seg button.on { color: #0a0a09; background: #8ab52f; border-color: #8ab52f; }
+
+  .wh-type-label { font-size: 10px; letter-spacing: .26em; text-transform: uppercase; color: #5f7d28; }
+
+  .wh-stage {
+    display: flex; gap: 24px; align-items: flex-start;
+  }
+  .wh-canvas {
+    flex: 1 1 auto; border: 1px solid #e0d09e1a; padding: 10px;
+    min-height: 660px; display: flex; align-items: center; justify-content: center;
+  }
+  .wh-rail { flex: 0 0 280px; }
+
+  .rail-panel {
+    border: 1px solid #e0d09e1a; padding: 14px 16px; margin-bottom: 14px;
+  }
+  .rail-title {
+    font-size: 10px; letter-spacing: .28em; text-transform: uppercase;
+    color: #e0d09e; margin-bottom: 2px;
+  }
+  .rail-meta { font-size: 10px; color: #5f7d28; margin-bottom: 10px; font-family: monospace; }
+
+  .item-list { display: flex; flex-direction: column; }
+  .item-list:hover .item-row { opacity: .38; }
+  .item-row:hover { opacity: 1 !important; }
+  .item-row {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 5px 0; border-bottom: 1px solid #e0d09e1a; transition: opacity .18s;
+    cursor: pointer;
+  }
+  .item-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
+  .item-name { flex: 1; font-size: 12px; color: #e0d09e; }
+  .item-date { font-size: 10px; color: #5f7d28; font-family: monospace; }
+
+  .legend-text { font-size: 10px; color: #5f7d28; line-height: 1.9; font-family: monospace; }
+  .legend-text .k { display: inline-block; width: 9px; height: 9px; margin-right: 7px; vertical-align: -1px; }
+  .insight { font-size: 10px; color: #5f7d28; line-height: 1.7; margin-top: 12px; font-family: monospace; }
+
+  .detail-panel { display: none; border: 1px solid #e0d09e1a; padding: 14px 16px; margin-bottom: 14px; }
+  .detail-panel.visible { display: block; }
+  .detail-name { font-size: 13px; color: #e0d09e; margin-bottom: 4px; }
+  .detail-meta { font-size: 10px; color: #5f7d28; margin-bottom: 10px; font-family: monospace; }
+  .detail-row {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 5px 0; border-bottom: 1px solid #e0d09e1a;
+  }
+  .detail-label { flex: 1; font-size: 12px; color: #a89c78; }
+  .detail-val { font-size: 10px; font-family: monospace; }
+
+  text { font-family: "Special Elite", monospace; }
+
+  .no-data {
+    text-align: center; padding: 60px 20px; color: #444; font-size: 13px; line-height: 1.8;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wh-header">
+  <h1 class="wh-title">The Wheel</h1>
+  <a href="{{ url_for('pitch_machine.draft_queue') }}" class="wh-back">← Draft Queue</a>
+</div>
+
+{% if not selected_config %}
+<div class="no-data">No active pitch types configured.</div>
+{% else %}
+
+<div class="wh-controls">
+  <div style="display:flex;align-items:center;gap:14px;">
+    <span class="wh-type-label">Pitch type</span>
+    <div class="seg" id="type-seg">
+      {% for cfg in configs %}
+      <button data-type="{{ cfg.name }}" data-cyclical="{{ 'true' if cfg.is_cyclical else 'false' }}"
+              class="{{ 'on' if cfg.name == selected_config.name else '' }}">
+        {{ '◯' if cfg.is_cyclical else '—' }} {{ cfg.name }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="wh-stage">
+  <div class="wh-canvas">
+    <svg id="viz" width="660" height="640" viewBox="0 0 660 640"></svg>
+  </div>
+
+  <div class="wh-rail">
+    <div class="rail-panel">
+      <div class="rail-title">Pitch window open</div>
+      <div class="rail-meta" id="win-meta">—</div>
+      <div class="item-list" id="win-list"></div>
+    </div>
+
+    <div class="detail-panel" id="detail-panel">
+      <div class="detail-name" id="d-name"></div>
+      <div class="detail-meta" id="d-meta"></div>
+      <div class="detail-row"><span class="detail-label">Outreach due</span><span class="detail-val" id="d-reach" style="color:#e4bb16"></span></div>
+      <div class="detail-row" id="d-dl-row" style="display:none"><span class="detail-label">Deadline</span><span class="detail-val" id="d-dl" style="color:#c42d2e"></span></div>
+      <div class="detail-row"><span class="detail-label">Days away</span><span class="detail-val" id="d-delta"></span></div>
+      <div class="detail-row"><span class="detail-label">Stage</span><span class="detail-val" id="d-stage"></span></div>
+    </div>
+
+    <div class="rail-panel">
+      <div class="rail-title">Legend</div>
+      <div class="legend-text" id="legend"></div>
+      <div class="insight" id="insight"></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<script>
+(function () {
+
+var ALL_DATA = {{ targets_json | safe }};
+var TODAY    = '{{ today }}';
+var SELECTED_CYCLICAL = {{ 'true' if selected_config and selected_config.is_cyclical else 'false' }};
+
+var C = {
+  gold:   '#e4bb16', goldSoft: '#8a7a2e',
+  olive:  '#8ab52f', oliveSoft: '#5f7d28',
+  crimson:'#c42d2e', faint: '#e0d09e26',
+  text:   '#a89c78', bright: '#e0d09e',
+};
+var MN = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+function el(tag, attrs) {
+  var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+/* date → fraction of year (0..1, starting 1 Jan) */
+function yearFraction(iso) {
+  var parts = iso.split('-').map(Number);
+  var y = parts[0], m = parts[1], d = parts[2];
+  var start = new Date(y, 0, 1);
+  var end   = new Date(y + 1, 0, 1);
+  var cur   = new Date(y, m - 1, d);
+  return (cur - start) / (end - start);
+}
+
+var CX = 330, CY = 306, R = 246;
+
+function frac2xy(frac, r) {
+  var a = frac * 2 * Math.PI - Math.PI / 2;
+  return [CX + Math.cos(a) * r, CY + Math.sin(a) * r];
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  var p = iso.split('-').map(Number);
+  return p[2] + ' ' + MN[p[1] - 1];
+}
+
+/* ── label de-collision (adapted from donut mockup) ──────────────── */
+function decollideLabelsSide(labels, side) {
+  /* labels: [{frac, y, el, lineEl}] for one half of the circle. sorted by y. */
+  labels.sort(function (a, b) { return a.y - b.y; });
+  var MIN = 22;
+  for (var k = 1; k < labels.length; k++) {
+    if (labels[k].y - labels[k - 1].y < MIN) labels[k].y = labels[k - 1].y + MIN;
+  }
+  /* shift up if overflow */
+  if (labels.length) {
+    var overflow = labels[labels.length - 1].y - (CY + R - 20);
+    if (overflow > 0) labels.forEach(function (l) { l.y -= overflow; });
+  }
+  var LX = side > 0 ? CX + R + 60 : CX - R - 60;
+  var EX = side > 0 ? LX - 12 : LX + 12;
+  var anc = side > 0 ? 'start' : 'end';
+  labels.forEach(function (l) {
+    /* leader line from point edge to elbow */
+    var [px, py] = frac2xy(l.frac, R - 30);
+    l.lineEl.setAttribute('x1', px.toFixed(1));
+    l.lineEl.setAttribute('y1', py.toFixed(1));
+    l.lineEl.setAttribute('x2', EX);
+    l.lineEl.setAttribute('y2', l.y.toFixed(1));
+    /* text */
+    l.el.setAttribute('x', LX);
+    l.el.setAttribute('y', l.y.toFixed(1));
+    l.el.setAttribute('text-anchor', anc);
+    l.el.setAttribute('dominant-baseline', 'middle');
+  });
+}
+
+function drawWheel(data) {
+  var s = document.getElementById('viz');
+  s.innerHTML = '';
+
+  /* rings */
+  [R, R + 26, R - 70, 84].forEach(function (r, i) {
+    s.appendChild(el('circle', {cx: CX, cy: CY, r: r, fill: 'none',
+      stroke: C.faint, 'stroke-width': 1, opacity: [.55, .18, .4, .5][i]}));
+  });
+
+  /* month ticks + labels */
+  MN.forEach(function (n, i) {
+    var frac = i / 12;
+    var [x1, y1] = frac2xy(frac, R - 6);
+    var [x2, y2] = frac2xy(frac, R + 8);
+    s.appendChild(el('line', {x1:x1,y1:y1,x2:x2,y2:y2,stroke:C.goldSoft,'stroke-width':1,opacity:.5}));
+    var [tx, ty] = frac2xy(frac + 1/24, R + 30);
+    var t = el('text', {x:tx,y:ty,fill:C.oliveSoft,'font-size':9,'letter-spacing':2.4,'text-anchor':'middle','dominant-baseline':'middle'});
+    t.textContent = n;
+    s.appendChild(t);
+  });
+
+  /* dormant rim ticks */
+  var dormantCount = data.dormant.length;
+  for (var i = 0; i < dormantCount; i++) {
+    var frac = i / Math.max(dormantCount, 1);
+    var [x1, y1] = frac2xy(frac, R - 2);
+    var [x2, y2] = frac2xy(frac, R + 3);
+    s.appendChild(el('line', {x1:x1,y1:y1,x2:x2,y2:y2,stroke:C.text,'stroke-width':.8,opacity:.15}));
+  }
+
+  /* today's position */
+  var todayFrac = yearFraction(TODAY);
+
+  /* 30-day window band ahead of today */
+  var [b1x, b1y] = frac2xy(todayFrac, R - 70);
+  var [b2x, b2y] = frac2xy(todayFrac + 30/365, R - 70);
+  var largeArc = (30/365 > 0.5) ? 1 : 0;
+  s.appendChild(el('path', {
+    d: 'M ' + b1x + ' ' + b1y + ' A ' + (R-70) + ' ' + (R-70) + ' 0 ' + largeArc + ' 1 ' + b2x + ' ' + b2y,
+    fill: 'none', stroke: C.gold, 'stroke-width': 22, opacity: .10,
+  }));
+
+  /* NOW hand */
+  var [nx, ny] = frac2xy(todayFrac, R - 8);
+  s.appendChild(el('line', {x1:CX,y1:CY,x2:nx,y2:ny,stroke:C.gold,'stroke-width':1.4}));
+  var nl = el('text', {x:nx,y:ny-13,fill:C.gold,'font-size':9,'letter-spacing':2,'text-anchor':'middle'});
+  nl.textContent = 'NOW';
+  s.appendChild(nl);
+
+  /* targets */
+  var soon = [];
+  var leftLabels = [], rightLabels = [];
+  var selected = null; /* will be set on click */
+
+  data.active.forEach(function (t) {
+    var frac = yearFraction(t.reach_out_1);
+    var delta = t.delta_days;
+    var overdue = delta < -30;
+    var live    = (delta >= -30 && delta <= 30);
+    var soonish = (delta > 30  && delta <= 75);
+
+    var r   = live ? R - 70 : R - 30;
+    var col = live ? C.gold : (soonish ? C.olive : C.text);
+    var sz  = live ? 4.5 : 2.6;
+    var opa = live ? 1   : (soonish ? .75 : .38);
+
+    var [x, y] = frac2xy(frac, r);
+    var g = el('g', {style: 'cursor:pointer'});
+    g.appendChild(el('circle', {cx:x,cy:y,r:sz,fill:col,opacity:opa}));
+    g.addEventListener('click', (function (tt) {
+      return function () { drawDetail(tt); };
+    })(t));
+    s.appendChild(g);
+
+    if (live) {
+      /* leader line placeholder — positions set after de-collision */
+      var lineEl = el('line', {stroke:C.goldSoft,'stroke-width':.6,opacity:.5});
+      s.appendChild(lineEl);
+      var textEl = el('text', {fill:C.bright,'font-size':10});
+      textEl.textContent = t.name;
+      s.appendChild(textEl);
+      var side = Math.cos(frac * 2 * Math.PI - Math.PI/2) >= 0 ? 1 : -1;
+      var bucket = side > 0 ? rightLabels : leftLabels;
+      bucket.push({frac:frac, y:y, el:textEl, lineEl:lineEl});
+      soon.push(t);
+    }
+  });
+
+  decollideLabelsSide(leftLabels, -1);
+  decollideLabelsSide(rightLabels, 1);
+
+  /* centre text */
+  var c1 = el('text', {x:CX,y:CY-14,fill:C.olive,'font-size':13,'letter-spacing':4,'text-anchor':'middle'});
+  c1.textContent = 'OUTREACH YEAR';
+  s.appendChild(c1);
+  var c2 = el('text', {x:CX,y:CY+8,fill:C.text,'font-size':12,'text-anchor':'middle'});
+  c2.textContent = 'when you write,';
+  s.appendChild(c2);
+  var c3 = el('text', {x:CX,y:CY+26,fill:C.text,'font-size':12,'text-anchor':'middle'});
+  c3.textContent = 'not when they play';
+  s.appendChild(c3);
+
+  /* window panel */
+  document.getElementById('win-meta').textContent =
+    soon.length + ' due within 30 days · ' + dormantCount + ' dormant';
+  document.getElementById('win-list').innerHTML = soon.map(function (t) {
+    return '<div class="item-row" onclick="showDetail(' + JSON.stringify(t) + ')">'
+      + '<span class="item-dot" style="background:' + C.gold + '"></span>'
+      + '<span class="item-name">' + t.name + '</span>'
+      + '<span class="item-date">' + fmtDate(t.reach_out_1) + '</span>'
+      + '</div>';
+  }).join('');
+
+  /* legend */
+  document.getElementById('legend').innerHTML =
+    '<span class="k" style="background:' + C.gold + '"></span>outreach due within 30 days<br>' +
+    '<span class="k" style="background:' + C.olive + '"></span>due within 10 weeks<br>' +
+    '<span class="k" style="background:' + C.text + ';opacity:.38"></span>later this year<br>' +
+    '<span class="k" style="background:' + C.text + ';opacity:.15"></span>' + dormantCount + ' dormant — no date set<br>' +
+    '<span class="k" style="background:' + C.crimson + '"></span>deadline (on click)';
+  document.getElementById('insight').textContent =
+    'Points sit on the date you must write. Click any to see the deadline.';
+}
+
+function drawLine(data) {
+  var s = document.getElementById('viz');
+  s.innerHTML = '';
+
+  document.getElementById('detail-panel').classList.remove('visible');
+
+  if (!data.active.length) {
+    var t = el('text', {x:330,y:320,fill:C.text,'font-size':13,'text-anchor':'middle'});
+    t.textContent = 'No targets with dates set.';
+    s.appendChild(t);
+    return;
+  }
+
+  /* sort by reach_out_1 */
+  var items = data.active.slice().sort(function (a, b) {
+    return a.reach_out_1 < b.reach_out_1 ? -1 : 1;
+  });
+
+  var y0 = 300, x0 = 60, x1 = 600;
+  var minFrac = yearFraction(items[0].reach_out_1);
+  var maxFrac = yearFraction(items[items.length - 1].reach_out_1);
+  var span = Math.max(maxFrac - minFrac, 1/12);
+
+  /* baseline */
+  s.appendChild(el('line', {x1:x0,y1:y0,x2:x1,y2:y0,stroke:C.faint,'stroke-width':1}));
+
+  var todayFrac = yearFraction(TODAY);
+  var tx = x0 + ((todayFrac - minFrac) / span) * (x1 - x0);
+  s.appendChild(el('line', {x1:tx,y1:y0-16,x2:tx,y2:y0+6,stroke:C.gold,'stroke-width':1.2}));
+  var nt = el('text', {x:tx,y:y0-26,fill:C.gold,'font-size':9,'letter-spacing':2,'text-anchor':'middle'});
+  nt.textContent = 'NOW'; s.appendChild(nt);
+
+  items.forEach(function (t, i) {
+    var frac = yearFraction(t.reach_out_1);
+    var x = x0 + ((frac - minFrac) / span) * (x1 - x0);
+    var yOff = y0 - 60 - ((i % 4) * 24);
+
+    s.appendChild(el('line', {x1:x,y1:yOff+8,x2:x,y2:y0-4,stroke:C.oliveSoft,'stroke-width':.8,opacity:.5}));
+    s.appendChild(el('circle', {cx:x,cy:yOff,r:3,fill:C.olive}));
+
+    var te = el('text', {x:x+7,y:yOff+4,fill:C.text,'font-size':10});
+    te.textContent = t.name;
+    s.appendChild(te);
+  });
+
+  var h = el('text', {x:x0,y:y0+50,fill:C.oliveSoft,'font-size':10,'letter-spacing':2.6});
+  h.textContent = 'ONE OFF · NO RETURN CYCLE'; s.appendChild(h);
+
+  document.getElementById('win-meta').textContent = items.length + ' targets';
+  document.getElementById('win-list').innerHTML = items.slice(0, 8).map(function (t) {
+    return '<div class="item-row">'
+      + '<span class="item-dot" style="background:' + C.olive + '"></span>'
+      + '<span class="item-name">' + t.name + '</span>'
+      + '<span class="item-date">' + fmtDate(t.reach_out_1) + '</span>'
+      + '</div>';
+  }).join('');
+
+  document.getElementById('legend').innerHTML =
+    '<span class="k" style="background:' + C.olive + '"></span>outreach date<br>' +
+    (data.dormant.length ? '<span class="k" style="background:' + C.text + ';opacity:.15"></span>' + data.dormant.length + ' dormant — no date set' : '');
+  document.getElementById('insight').textContent =
+    'A one-off type has no annual return. Same data, different shape.';
+}
+
+function drawDetail(t) {
+  document.getElementById('d-name').textContent = t.name;
+  document.getElementById('d-meta').textContent = t.stage;
+  document.getElementById('d-reach').textContent = fmtDate(t.reach_out_1);
+  document.getElementById('d-delta').textContent =
+    t.delta_days === 0 ? 'today' :
+    t.delta_days > 0   ? t.delta_days + ' days' :
+                         Math.abs(t.delta_days) + ' days overdue';
+  document.getElementById('d-stage').textContent = t.stage;
+  var dlRow = document.getElementById('d-dl-row');
+  if (t.submission_deadline) {
+    document.getElementById('d-dl').textContent = fmtDate(t.submission_deadline);
+    dlRow.style.display = '';
+  } else {
+    dlRow.style.display = 'none';
+  }
+  document.getElementById('detail-panel').classList.add('visible');
+
+  /* draw the arc on the wheel from reach_out_1 to submission_deadline */
+  if (SELECTED_CYCLICAL && t.submission_deadline) {
+    var s = document.getElementById('viz');
+    /* remove old selection marks */
+    document.querySelectorAll('.sel-mark').forEach(function (e) { e.remove(); });
+
+    var of = yearFraction(t.reach_out_1);
+    var df = yearFraction(t.submission_deadline);
+    var [ox, oy] = frac2xy(of, R - 70);
+    var [dx, dy] = frac2xy(df, R + 26);
+
+    var ring = el('circle', {cx:ox,cy:oy,r:7,fill:'none',stroke:C.gold,'stroke-width':1,'class':'sel-mark'});
+    var dot  = el('circle', {cx:dx,cy:dy,r:4,fill:C.crimson,'class':'sel-mark'});
+    var arc  = el('path', {
+      d: 'M ' + ox + ' ' + oy + ' Q ' + CX + ' ' + CY + ' ' + dx + ' ' + dy,
+      fill: 'none', stroke: C.crimson, 'stroke-width': 1, opacity: .5,
+      'stroke-dasharray': '3 4', 'class': 'sel-mark',
+    });
+    var lbl = el('text', {
+      x: dx + (dx > CX ? 9 : -9), y: dy + 3,
+      fill: C.crimson, 'font-size': 10,
+      'text-anchor': dx > CX ? 'start' : 'end', 'class': 'sel-mark',
+    });
+    lbl.textContent = 'deadline';
+    s.appendChild(ring); s.appendChild(dot); s.appendChild(arc); s.appendChild(lbl);
+  }
+}
+
+window.showDetail = drawDetail;
+
+/* initial render */
+if (SELECTED_CYCLICAL) {
+  drawWheel(ALL_DATA);
+} else {
+  drawLine(ALL_DATA);
+}
+
+/* pitch type switcher — navigates to update data from server */
+document.getElementById('type-seg') && document.getElementById('type-seg').addEventListener('click', function (e) {
+  var b = e.target.closest('button');
+  if (!b) return;
+  var url = new URL(window.location.href);
+  url.searchParams.set('type', b.dataset.type);
+  window.location.href = url.toString();
+});
+
+})();
+</script>
+{% endblock %}

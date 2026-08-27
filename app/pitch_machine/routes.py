@@ -810,6 +810,58 @@ def not_a_fit(pid: int):
     return redirect(url_for('pitch_machine.review'))
 
 
+# ── The Wheel ────────────────────────────────────────────────────────────────────
+
+@pm_bp.route('/wheel')
+@login_required
+def wheel():
+    _require_access()
+
+    import json
+    from app.models.pitch_config import PitchTypeConfig
+    from app.models.pitch_target import PitchTarget
+
+    configs = PitchTypeConfig.query.filter_by(active=True).order_by(
+        PitchTypeConfig.sort_order, PitchTypeConfig.id
+    ).all()
+
+    selected_name = request.args.get('type')
+    selected_config = next((c for c in configs if c.name == selected_name), None)
+    if selected_config is None and configs:
+        selected_config = configs[0]
+    if selected_config is None:
+        return render_template('pitch_machine/wheel.html', configs=[], selected_config=None,
+                               targets_json='{"active":[],"dormant":[]}', today=date.today().isoformat())
+
+    targets = PitchTarget.query.filter(
+        PitchTarget.not_a_fit == False,
+        PitchTarget.pitch_type == selected_config.name,
+    ).all()
+
+    today = date.today()
+    active, dormant = [], []
+    for t in targets:
+        if t.reach_out_1:
+            active.append({
+                'id':                  t.id,
+                'hubspot_id':          t.hubspot_id or '',
+                'name':                t.name,
+                'reach_out_1':         t.reach_out_1.isoformat(),
+                'submission_deadline': t.submission_deadline.isoformat() if t.submission_deadline else None,
+                'stage':               t.stage,
+                'delta_days':          (t.reach_out_1 - today).days,
+            })
+        else:
+            dormant.append({'name': t.name, 'stage': t.stage})
+
+    return render_template('pitch_machine/wheel.html',
+        configs=configs,
+        selected_config=selected_config,
+        targets_json=json.dumps({'active': active, 'dormant': dormant}),
+        today=today.isoformat(),
+    )
+
+
 # ── Pitch type config admin (super_admin only) ───────────────────────────────────
 
 def _require_super_admin():
@@ -838,6 +890,7 @@ def config_new():
         prompt_template      = request.form.get('prompt_template', '').strip()
         badge_color          = request.form.get('badge_color', '#888888').strip()
         sort_order           = int(request.form.get('sort_order', 0) or 0)
+        is_cyclical          = request.form.get('is_cyclical') == '1'
 
         error = _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color)
         if error:
@@ -856,6 +909,7 @@ def config_new():
             prompt_template=prompt_template,
             badge_color=badge_color,
             sort_order=sort_order,
+            is_cyclical=is_cyclical,
             active=True,
         ))
         db.session.commit()
@@ -879,6 +933,7 @@ def config_edit(tid: int):
         prompt_template      = request.form.get('prompt_template', '').strip()
         badge_color          = request.form.get('badge_color', '#888888').strip()
         sort_order           = int(request.form.get('sort_order', 0) or 0)
+        is_cyclical          = request.form.get('is_cyclical') == '1'
 
         error = _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color)
         if error:
@@ -900,6 +955,7 @@ def config_edit(tid: int):
         pt.prompt_template      = prompt_template
         pt.badge_color          = badge_color
         pt.sort_order           = sort_order
+        pt.is_cyclical          = is_cyclical
         db.session.commit()
         flash(f'Pitch type {name!r} updated.', 'success')
         return redirect(url_for('pitch_machine.config_list'))
@@ -911,6 +967,7 @@ def config_edit(tid: int):
                                'prompt_template':      pt.prompt_template,
                                'badge_color':          pt.badge_color,
                                'sort_order':           pt.sort_order,
+                               'is_cyclical':          '1' if pt.is_cyclical else '0',
                            })
 
 

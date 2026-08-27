@@ -280,3 +280,15 @@ CREATE TABLE IF NOT EXISTS pitch_targets (
 --   ADD COLUMN IF NOT EXISTS research_notes MEDIUMTEXT    AFTER draft_body,
 --   ADD COLUMN IF NOT EXISTS to_email       VARCHAR(500)  AFTER research_notes,
 --   ADD COLUMN IF NOT EXISTS cc_email       VARCHAR(500)  AFTER to_email;
+
+-- ─── Phase 1: Wheel — hubspot_owner_id on pitch_targets ──────────────────────
+-- Run on production before deploying Phase 1 code.
+-- ALTER TABLE pitch_targets
+--   ADD COLUMN IF NOT EXISTS hubspot_owner_id VARCHAR(50) NULL AFTER hs_lead_status;
+
+-- ─── Phase 1: Wheel — is_cyclical on pitch_type_configs ──────────────────────
+-- TRUE (default) = annual recurrence → renders the Wheel.
+-- FALSE = one-off / tour-anchored → renders the linear timeline.
+-- Run on production before deploying Phase 1 code.
+-- ALTER TABLE pitch_type_configs
+--   ADD COLUMN IF NOT EXISTS is_cyclical BOOLEAN NOT NULL DEFAULT TRUE AFTER active;

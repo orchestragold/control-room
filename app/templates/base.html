@@ -353,8 +353,13 @@
           <div id="nav-og">
             {% if current_user.has_project_access('pitch-machine') %}
             <a href="{{ url_for('pitch_machine.board') }}"
-               class="nav-item{% if request.endpoint and request.endpoint.startswith('pitch_machine.') %} active{% endif %}">
+               class="nav-item{% if request.endpoint and request.endpoint.startswith('pitch_machine.') and request.endpoint != 'pitch_machine.wheel' %} active{% endif %}">
               Pitch Machine
+            </a>
+            <a href="{{ url_for('pitch_machine.wheel') }}"
+               class="nav-item{% if request.endpoint == 'pitch_machine.wheel' %} active{% endif %}"
+               style="padding-left:28px;font-size:12px;">
+              ◯ Wheel
             </a>
             {% endif %}
             {% if current_user.has_project_access('distribution') %}
