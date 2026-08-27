@@ -198,3 +198,72 @@ class TestNotAFitRoundtrip:
         fieldnames = detect_fieldnames(_SAMPLE)
         for col in COLUMNS:
             assert col in fieldnames, f'COLUMNS entry {col!r} missing after not_a_fit detect'
+
+
+# ── hs: append path ───────────────────────────────────────────────────────────
+
+class TestHubSpotAppendRoundtrip:
+    """
+    Guards the new-row append path in _mark_queue_sheet_not_a_fit: when an hs:
+    item has no matching CSV row, a fresh QueueItem is appended. This is the path
+    that ran in production when Dark Star Jubilee was rejected — a different failure
+    mode from the update path above and deserving its own case.
+
+    Specifically: starting from a 9-column CSV (no not_a_fit_reason), appending a
+    new row must (a) forward-migrate the header to 10 columns, (b) write the new
+    row with correct values, and (c) leave all existing rows' email_address intact.
+    """
+
+    def _read_header(self, csv_text: str) -> list[str]:
+        return list(csv.DictReader(io.StringIO(csv_text)).fieldnames or [])
+
+    def _read_rows(self, csv_text: str) -> list[dict]:
+        return list(csv.DictReader(io.StringIO(csv_text)))
+
+    def test_append_adds_new_row(self):
+        """Appending a QueueItem to a 9-column CSV produces 3 rows."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        items.append(QueueItem(
+            name='Dark Star Jubilee',
+            hubspot_id='338507130587',
+            status='not_a_fit',
+            not_a_fit_reason='testing',
+        ))
+        out = serialize_queue(items, fieldnames=fieldnames)
+        assert len(self._read_rows(out)) == 3
+
+    def test_append_new_row_values(self):
+        """New row carries the correct hubspot_id, status, and reason."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        items.append(QueueItem(
+            name='Dark Star Jubilee',
+            hubspot_id='338507130587',
+            status='not_a_fit',
+            not_a_fit_reason='testing',
+        ))
+        out = serialize_queue(items, fieldnames=fieldnames)
+        rows = {r['name']: r for r in self._read_rows(out)}
+        assert rows['Dark Star Jubilee']['status'] == 'not_a_fit'
+        assert rows['Dark Star Jubilee']['hubspot_id'] == '338507130587'
+        assert rows['Dark Star Jubilee']['not_a_fit_reason'] == 'testing'
+        assert rows['Dark Star Jubilee']['email_address'] == ''
+
+    def test_append_forward_migrates_header(self):
+        """9-column CSV gains not_a_fit_reason column when new row is appended."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        items.append(QueueItem(name='New Target', status='not_a_fit'))
+        out = serialize_queue(items, fieldnames=fieldnames)
+        assert 'not_a_fit_reason' in self._read_header(out)
+
+    def test_append_existing_emails_intact(self):
+        """Appending a new row does not disturb email_address on existing rows."""
+        fieldnames = detect_fieldnames(_SAMPLE)
+        items = parse_queue(_SAMPLE)
+        items.append(QueueItem(name='New Target', status='not_a_fit'))
+        out = serialize_queue(items, fieldnames=fieldnames)
+        rows = {r['name']: r for r in self._read_rows(out)}
+        assert rows['XRAY.fm']['email_address'] == 'theo@xray.fm'
+        assert rows['KBOO 90.7 FM']['email_address'] == 'news@kboo.fm'

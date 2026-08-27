@@ -664,7 +664,7 @@ def approve(pid: int):
     approval.send_date     = send_date
     approval.status        = 'approved'
     approval.approved_by   = current_user.id
-    approval.approved_at   = datetime.utcnow()
+    approval.approved_at   = datetime.utcnow()  # Phase 3: derive Touch 2/3 dates from date.today(), not approved_at.date() — UTC vs local drift after 5pm Pacific
 
     db.session.add(ApprovalLog(
         approver_id = current_user.id,

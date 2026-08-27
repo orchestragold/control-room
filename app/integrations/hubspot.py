@@ -20,7 +20,7 @@ the kanban view layer, not here — this module does what it's told.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 import requests
@@ -169,7 +169,7 @@ class HubSpotClient:
         Uses the CRM v3 Notes API with an inline company association.
         associationTypeId 190 = note_to_company (HubSpot-defined).
         """
-        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         return self._post('/crm/v3/objects/notes', {
             'properties': {
                 'hs_note_body': body,

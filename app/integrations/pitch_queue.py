@@ -17,7 +17,7 @@ Column contract (decision #8 — extends Festival Outreach spreadsheet columns):
                   scheduling.py if this interpretation is wrong.
   status        — queued | pitched | removed
   notes         — free-form human context only; must NOT contain email addresses
-  date_added    — ISO datetime string
+  date_added    — ISO date string (YYYY-MM-DD, local date)
   hubspot_id    — HubSpot Company ID if this item maps to an existing record
   email_address — primary recipient address; single address, no fallback parsing from notes
 
@@ -166,4 +166,4 @@ def _parse_date(value: str) -> Optional[date]:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat(timespec='seconds')
+    return date.today().isoformat()
