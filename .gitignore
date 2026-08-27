@@ -13,3 +13,4 @@ env/
 *.log
 .idea/
 .vscode/
+scripts/.smoke_session

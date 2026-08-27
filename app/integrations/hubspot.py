@@ -105,6 +105,21 @@ class HubSpotClient:
         resp.raise_for_status()
         return resp.json()
 
+    def _post(self, path: str, body: dict) -> dict:
+        if not self._throttle.can_call():
+            raise HubSpotError(
+                'HubSpot rate limit reached — wait a moment and try again'
+            )
+        self._throttle.record_call()
+        resp = requests.post(
+            f'{_BASE_URL}{path}',
+            headers=self._headers(),
+            json=body,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     # ── Public API ──────────────────────────────────────────────────────────────
 
     def fetch_all_companies(self) -> list[dict[str, Any]]:
@@ -147,6 +162,24 @@ class HubSpotClient:
             f'/crm/v3/objects/companies/{hubspot_id}',
             {'properties': properties},
         )
+
+    def create_company_note(self, hubspot_id: str, body: str) -> dict:
+        """
+        Create a Note on a HubSpot Company record (visible in its Activity feed).
+        Uses the CRM v3 Notes API with an inline company association.
+        associationTypeId 190 = note_to_company (HubSpot-defined).
+        """
+        now_ms = int(datetime.utcnow().timestamp() * 1000)
+        return self._post('/crm/v3/objects/notes', {
+            'properties': {
+                'hs_note_body': body,
+                'hs_timestamp': str(now_ms),
+            },
+            'associations': [{
+                'to': {'id': hubspot_id},
+                'types': [{'associationCategory': 'HUBSPOT_DEFINED', 'associationTypeId': 190}],
+            }],
+        })
 
 
 # ── Cache sync ──────────────────────────────────────────────────────────────────

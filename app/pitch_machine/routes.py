@@ -799,7 +799,9 @@ def not_a_fit(pid: int):
     ))
     db.session.commit()
 
-    _mark_queue_sheet_not_a_fit(approval.company_name, reason)
+    hubspot_id = approval.hubspot_contact_id or ''
+    _mark_queue_sheet_not_a_fit(approval.company_name, reason, hubspot_id)
+    _mirror_not_a_fit_to_hubspot(hubspot_id, approval.company_name, reason)
 
     msg = f'{approval.company_name} marked not a fit and removed from queue.'
     if reason:
@@ -1019,15 +1021,19 @@ def _remove_from_queue_sheet(company_name: str) -> None:
         print(f'[queue sheet] remove failed for {company_name!r}: {e}', file=sys.stderr)
 
 
-def _mark_queue_sheet_not_a_fit(company_name: str, reason: str) -> None:
-    """Mark a queue item as 'not_a_fit' with an optional reason and rewrite the CSV."""
+def _mark_queue_sheet_not_a_fit(company_name: str, reason: str, hubspot_id: str = '') -> None:
+    """Mark a queue item as 'not_a_fit' with an optional reason and rewrite the CSV.
+
+    For hs: items that have no CSV row yet, appends a new row so the sync engine
+    picks up the rejection on next run.
+    """
     from app.integrations.dropbox_sync import (
         DropboxError,
         get_or_create_queue_csv,
         upload_file,
     )
     from app.integrations.pitch_queue import (
-        QUEUE_PATH, detect_fieldnames, parse_queue, serialize_queue,
+        QUEUE_PATH, QueueItem, detect_fieldnames, parse_queue, serialize_queue,
     )
     try:
         content = get_or_create_queue_csv()
@@ -1039,11 +1045,41 @@ def _mark_queue_sheet_not_a_fit(company_name: str, reason: str) -> None:
                 item.status = 'not_a_fit'
                 item.not_a_fit_reason = reason
                 changed = True
+        if not changed and hubspot_id:
+            items.append(QueueItem(
+                name=company_name,
+                hubspot_id=hubspot_id,
+                status='not_a_fit',
+                not_a_fit_reason=reason,
+            ))
+            changed = True
         if changed:
             upload_file(QUEUE_PATH, serialize_queue(items, fieldnames=fieldnames))
     except Exception as e:
         import sys
         print(f'[queue sheet] not_a_fit write failed for {company_name!r}: {e}', file=sys.stderr)
+
+
+def _mirror_not_a_fit_to_hubspot(hubspot_id: str, company_name: str, reason: str) -> None:
+    """Set hs_lead_status=UNQUALIFIED and log a note on the HubSpot company record.
+
+    Best-effort: failures are logged but never raised. The CSV write must already
+    have succeeded before this is called. Never read this status back — Portal is
+    source of truth for not_a_fit.
+
+    reason goes into a HubSpot Note (Activity feed) so Maeve can see *why*,
+    not just *that* — without touching the 10/10 custom property cap.
+    """
+    import sys
+    if not hubspot_id:
+        return
+    try:
+        client = HubSpotClient()
+        client.update_company(hubspot_id, {'hs_lead_status': 'UNQUALIFIED'})
+        if reason:
+            client.create_company_note(hubspot_id, f'Not a fit — {company_name}: {reason}')
+    except Exception as e:
+        print(f'[hubspot] not_a_fit mirror failed for {company_name!r}: {e}', file=sys.stderr)
 
 
 def _write_hubspot_reach_out_1(hubspot_id: str, send_date: Optional[date]) -> Optional[str]:

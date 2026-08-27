@@ -209,23 +209,25 @@ class TestNotAFit:
             assert log.details['reason'] == 'too classical for our sound'
 
     def test_queue_sheet_update_called_with_name_and_reason(self, app, db, client):
-        """_mark_queue_sheet_not_a_fit is called with the company name and reason."""
+        """_mark_queue_sheet_not_a_fit is called with company name, reason, and hubspot_id."""
         pid = _make_pending_approval(app, db)
         called_with = []
 
-        def spy(company_name, reason):
-            called_with.append((company_name, reason))
+        def spy(company_name, reason, hubspot_id=''):
+            called_with.append((company_name, reason, hubspot_id))
 
         with patch('app.pitch_machine.routes._mark_queue_sheet_not_a_fit',
                    side_effect=spy):
-            client.post(
-                NOT_A_FIT_URL.format(pid=pid),
-                data={'reason': 'too classical for our sound'},
-            )
+            with patch('app.pitch_machine.routes._mirror_not_a_fit_to_hubspot'):
+                client.post(
+                    NOT_A_FIT_URL.format(pid=pid),
+                    data={'reason': 'too classical for our sound'},
+                )
 
-        assert called_with == [('Test Festival', 'too classical for our sound')], (
-            f"_mark_queue_sheet_not_a_fit called with: {called_with}"
-        )
+        assert len(called_with) == 1, f"Expected 1 call, got: {called_with}"
+        company_name, reason, _ = called_with[0]
+        assert company_name == 'Test Festival', f"Wrong company_name: {company_name}"
+        assert reason == 'too classical for our sound', f"Wrong reason: {reason}"
 
     def test_already_processed_approval_is_rejected(self, app, db, client):
         """Route must refuse to process a non-pending approval (flash + redirect)."""

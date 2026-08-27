@@ -121,13 +121,14 @@
   .limit-note     { font-size: 12px; color: #666; }
 
   /* ── Async generation panel ─────────────────────────────────────────────── */
-  #gen-panel {
-    margin-top: 20px;
+  .gen-panel {
     padding: 20px;
     background: #0a0a0a;
     border: 1px solid #1e1e1e;
     border-radius: 3px;
   }
+  #gen-panel-top { margin-bottom: 20px; }
+  #gen-panel     { margin-top: 20px; }
   .gen-headline { font-size: 14px; color: #ccc; margin-bottom: 14px; }
   .gen-headline strong { color: #fff; }
 
@@ -191,6 +192,23 @@
 <div class="notice notice-warn">
   Generation is synchronous — expect 30–60 seconds for {{ batch_limit }} items. Page will appear frozen; don't close it.
 </div>
+
+{% if pending_gen > 0 %}
+<div class="gen-panel" id="gen-panel-top">
+  <div class="gen-headline">
+    <strong id="gen-count-label-top">{{ pending_gen }}</strong>
+    draft<span id="gen-plural-top">{{ 's' if pending_gen != 1 else '' }}</span> queued
+  </div>
+  <div class="progress-track"><div class="progress-fill" id="progress-fill-top"></div></div>
+  <div class="gen-steps" id="gen-steps-top"></div>
+  <p class="gen-note">Each draft takes ~60–90 seconds. Page stays responsive — you can navigate away and come back.</p>
+  <div style="margin-top:14px;">
+    <button class="btn-process" id="process-btn-top" onclick="startProcessing()">
+      Process drafts
+    </button>
+  </div>
+</div>
+{% endif %}
 
 <form method="post" action="{{ url_for('pitch_machine.generate') }}" id="dq-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -271,7 +289,7 @@
 </form>
 
 {% if pending_gen > 0 %}
-<div id="gen-panel">
+<div class="gen-panel" id="gen-panel">
   <div class="gen-headline">
     <strong id="gen-count-label">{{ pending_gen }}</strong>
     draft<span id="gen-plural">{{ 's' if pending_gen != 1 else '' }}</span> queued
@@ -317,17 +335,36 @@ var _doneGen    = 0;
 var _errors     = [];
 var _processing = false;
 
+function _panels() {
+  return [
+    {
+      btn:      document.getElementById('process-btn'),
+      stepsEl:  document.getElementById('gen-steps'),
+      fill:     document.getElementById('progress-fill'),
+      headline: document.getElementById('gen-count-label'),
+      plural:   document.getElementById('gen-plural'),
+      panel:    document.getElementById('gen-panel'),
+    },
+    {
+      btn:      document.getElementById('process-btn-top'),
+      stepsEl:  document.getElementById('gen-steps-top'),
+      fill:     document.getElementById('progress-fill-top'),
+      headline: document.getElementById('gen-count-label-top'),
+      plural:   document.getElementById('gen-plural-top'),
+      panel:    document.getElementById('gen-panel-top'),
+    },
+  ].filter(function (p) { return p.btn; });
+}
+
 function startProcessing() {
   if (_processing) return;
   _processing = true;
 
-  var btn      = document.getElementById('process-btn');
-  var stepsEl  = document.getElementById('gen-steps');
-  var fill     = document.getElementById('progress-fill');
-  var headline = document.getElementById('gen-count-label');
-
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
+  var panels = _panels();
+  panels.forEach(function (p) {
+    p.btn.disabled = true;
+    p.btn.textContent = 'Generating…';
+  });
 
   function processNext() {
     fetch('{{ url_for("pitch_machine.run_generate_next") }}', {
@@ -341,35 +378,36 @@ function startProcessing() {
     .then(function (data) {
       _doneGen++;
 
-      var step = document.createElement('div');
-      if (data.error) {
-        _errors.push(data.error);
-        step.className = 'gen-step errored';
-        step.textContent = data.error;
-      } else if (data.name) {
-        step.className = 'gen-step done';
-        step.textContent = data.name;
-      }
-      if (step.textContent) stepsEl.appendChild(step);
-
       var pct = (_totalGen > 0) ? (_doneGen / _totalGen) * 100 : 100;
-      fill.style.width = Math.min(pct, 100) + '%';
-      headline.textContent = data.remaining;
-      document.getElementById('gen-plural').textContent = data.remaining === 1 ? '' : 's';
+
+      if (data.error) _errors.push(data.error);
+
+      panels.forEach(function (p) {
+        if (data.error || data.name) {
+          var step = document.createElement('div');
+          step.className = data.error ? 'gen-step errored' : 'gen-step done';
+          step.textContent = data.error || data.name;
+          p.stepsEl.appendChild(step);
+        }
+        p.fill.style.width = Math.min(pct, 100) + '%';
+        p.headline.textContent = data.remaining;
+        p.plural.textContent = data.remaining === 1 ? '' : 's';
+      });
 
       if (data.done) {
-        fill.style.width = '100%';
-        btn.textContent = 'Done';
+        panels.forEach(function (p) { p.fill.style.width = '100%'; });
         if (_errors.length === 0) {
           window.location.href = '{{ url_for("pitch_machine.review") }}';
         } else {
-          btn.disabled = false;
-          btn.textContent = 'Retry failed';
-          var errDiv = document.createElement('div');
-          errDiv.className = 'gen-note';
-          errDiv.style.color = '#f87171';
-          errDiv.textContent = _errors.length + ' draft(s) failed — see above. Others saved to Review Drafts.';
-          document.getElementById('gen-panel').appendChild(errDiv);
+          panels.forEach(function (p) {
+            p.btn.disabled = false;
+            p.btn.textContent = 'Retry failed';
+            var errDiv = document.createElement('div');
+            errDiv.className = 'gen-note';
+            errDiv.style.color = '#f87171';
+            errDiv.textContent = _errors.length + ' draft(s) failed — see above. Others saved to Review Drafts.';
+            p.panel.appendChild(errDiv);
+          });
         }
       } else {
         processNext();
@@ -377,13 +415,15 @@ function startProcessing() {
     })
     .catch(function (err) {
       _processing = false;
-      btn.disabled = false;
-      btn.textContent = 'Resume';
-      var errDiv = document.createElement('div');
-      errDiv.className = 'gen-note';
-      errDiv.style.color = '#f87171';
-      errDiv.textContent = 'Request failed (' + err.message + ') — click Resume to continue where it left off.';
-      document.getElementById('gen-panel').appendChild(errDiv);
+      panels.forEach(function (p) {
+        p.btn.disabled = false;
+        p.btn.textContent = 'Resume';
+        var errDiv = document.createElement('div');
+        errDiv.className = 'gen-note';
+        errDiv.style.color = '#f87171';
+        errDiv.textContent = 'Request failed (' + err.message + ') — click Resume to continue where it left off.';
+        p.panel.appendChild(errDiv);
+      });
     });
   }
 
