@@ -548,6 +548,18 @@ def sync_pitch_targets(
         PitchTarget.query.delete(synchronize_session=False)
         for record in all_records:
             db.session.add(PitchTarget(last_synced_at=now, **record))
+        db.session.flush()  # rows exist; FKs resolve before override pass
+
+        # Apply user-set overrides — runs AFTER the replace so they survive re-syncs.
+        from app.models.pitch_target_override import PitchTargetOverride
+        overrides = PitchTargetOverride.query.all()
+        if overrides:
+            override_map = {o.hubspot_id: o.outreach_date_override for o in overrides}
+            for pt in PitchTarget.query.filter(
+                PitchTarget.hubspot_id.in_(override_map.keys())
+            ).all():
+                pt.reach_out_1 = override_map[pt.hubspot_id]
+
         db.session.commit()
     except Exception:
         db.session.rollback()

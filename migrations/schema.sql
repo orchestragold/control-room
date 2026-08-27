@@ -286,6 +286,16 @@ CREATE TABLE IF NOT EXISTS pitch_targets (
 -- ALTER TABLE pitch_targets
 --   ADD COLUMN IF NOT EXISTS hubspot_owner_id VARCHAR(50) NULL AFTER hs_lead_status;
 
+-- ─── Phase 1b: Wheel drag — pitch_target_overrides ──────────────────────────
+-- Keyed on hubspot_id (stable across pitch_targets DELETE+INSERT cycles).
+-- Run on production before deploying Phase 1b code.
+-- CREATE TABLE IF NOT EXISTS pitch_target_overrides (
+--   hubspot_id             VARCHAR(50) NOT NULL PRIMARY KEY,
+--   outreach_date_override DATE        NOT NULL,
+--   override_set_by        VARCHAR(200) NOT NULL,
+--   override_set_at        DATETIME    NOT NULL
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Phase 1: Wheel — is_cyclical on pitch_type_configs ──────────────────────
 -- TRUE (default) = annual recurrence → renders the Wheel.
 -- FALSE = one-off / tour-anchored → renders the linear timeline.

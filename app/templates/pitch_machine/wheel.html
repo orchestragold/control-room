@@ -462,6 +462,146 @@ document.getElementById('type-seg') && document.getElementById('type-seg').addEv
   window.location.href = url.toString();
 });
 
+/* ── Drag to reschedule (cyclical wheel only) ──────────────────────────────── */
+if (SELECTED_CYCLICAL) {
+  var OVERRIDE_URL = '{{ url_for("pitch_machine.wheel_set_override") }}';
+  var CSRF_TOKEN   = document.querySelector('meta[name="csrf-token"]').content;
+
+  var _drag = null;          /* { target, ghostEl, labelEl } or null */
+  var _svg  = document.getElementById('viz');
+
+  /* fraction of year → calendar date, biased toward the future */
+  function fracToDate(frac) {
+    var now = new Date(TODAY);
+    var year = now.getFullYear();
+    /* try this year first; if result is >60 days in the past, use next year */
+    var candidate = new Date(year, 0, 1);
+    candidate.setTime(candidate.getTime() + frac * 365.25 * 86400000);
+    var diffDays = (candidate - now) / 86400000;
+    if (diffDays < -60) {
+      candidate = new Date(year + 1, 0, 1);
+      candidate.setTime(candidate.getTime() + frac * 365.25 * 86400000);
+    }
+    var y = candidate.getFullYear();
+    var m = String(candidate.getMonth() + 1).padStart(2, '0');
+    var d = String(candidate.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+  }
+
+  /* mouse position → year fraction */
+  function mouseToFrac(e) {
+    var rect = _svg.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    /* SVG viewBox is 660x640; rect may be scaled */
+    var scaleX = 660 / rect.width;
+    var scaleY = 640 / rect.height;
+    var dx = (mx * scaleX) - CX;
+    var dy = (my * scaleY) - CY;
+    var angle = Math.atan2(dy, dx) + Math.PI / 2; /* 0 = top */
+    if (angle < 0) angle += 2 * Math.PI;
+    return angle / (2 * Math.PI);
+  }
+
+  /* add drag listeners to target dots — called after drawWheel renders */
+  var _origDrawWheel = drawWheel;
+  drawWheel = function (data) {
+    _origDrawWheel(data);
+    attachDragListeners(data);
+  };
+
+  function attachDragListeners(data) {
+    /* re-query dots: each target dot is the first <circle> in its <g> */
+    var groups = _svg.querySelectorAll('g[style="cursor:pointer"]');
+    groups.forEach(function (g, i) {
+      var t = data.active[i];
+      if (!t || !t.hubspot_id) return;  /* can only override HubSpot-linked targets */
+      var dot = g.querySelector('circle');
+      if (!dot) return;
+      dot.style.cursor = 'grab';
+      dot.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        /* ghost dot + date label */
+        var ghost = el('circle', {r: 6, fill: 'none', stroke: '#e4bb16',
+          'stroke-width': 1.5, opacity: .8, 'class': 'drag-ghost'});
+        var label = el('text', {'font-size': 10, fill: '#e4bb16',
+          'text-anchor': 'middle', 'class': 'drag-ghost'});
+        _svg.appendChild(ghost);
+        _svg.appendChild(label);
+        _drag = {target: t, ghostEl: ghost, labelEl: label};
+        dot.style.cursor = 'grabbing';
+      });
+    });
+  }
+
+  _svg.addEventListener('mousemove', function (e) {
+    if (!_drag) return;
+    var frac = mouseToFrac(e);
+    var [gx, gy] = frac2xy(frac, R - 70);
+    _drag.ghostEl.setAttribute('cx', gx.toFixed(1));
+    _drag.ghostEl.setAttribute('cy', gy.toFixed(1));
+    var dateStr = fracToDate(frac);
+    var parts = dateStr.split('-').map(Number);
+    _drag.labelEl.setAttribute('x', (gx + (gx > CX ? 30 : -30)).toFixed(1));
+    _drag.labelEl.setAttribute('y', (gy - 12).toFixed(1));
+    _drag.labelEl.textContent = parts[2] + ' ' + MN[parts[1] - 1] + ' ' + parts[0];
+  });
+
+  _svg.addEventListener('mouseup', function (e) {
+    if (!_drag) return;
+    var t = _drag.target;
+    /* remove ghost */
+    _svg.querySelectorAll('.drag-ghost').forEach(function (el) { el.remove(); });
+    _svg.querySelectorAll('g[style="cursor:pointer"] circle').forEach(function (c) {
+      c.style.cursor = 'grab';
+    });
+
+    var frac    = mouseToFrac(e);
+    var newDate = fracToDate(frac);
+    _drag = null;
+
+    /* write override */
+    fetch(OVERRIDE_URL, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': CSRF_TOKEN,
+      },
+      body: JSON.stringify({hubspot_id: t.hubspot_id, outreach_date: newDate}),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.ok) {
+        /* patch the local data array and redraw */
+        ALL_DATA.active.forEach(function (item) {
+          if (item.hubspot_id === t.hubspot_id) {
+            item.reach_out_1 = data.new_date;
+            var today = new Date(TODAY);
+            var d     = new Date(data.new_date);
+            item.delta_days = Math.round((d - today) / 86400000);
+          }
+        });
+        drawWheel(ALL_DATA);
+      }
+    })
+    .catch(function (err) {
+      console.error('override failed:', err);
+    });
+  });
+
+  /* cancel drag if mouse leaves SVG */
+  _svg.addEventListener('mouseleave', function () {
+    if (!_drag) return;
+    _svg.querySelectorAll('.drag-ghost').forEach(function (e) { e.remove(); });
+    _drag = null;
+  });
+
+  /* initial drag listener wiring */
+  attachDragListeners(ALL_DATA);
+}
+
 })();
 </script>
 {% endblock %}

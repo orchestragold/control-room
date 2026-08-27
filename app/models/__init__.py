@@ -6,6 +6,7 @@ from .knowledge import WarmContact, DropboxSync
 from .hubspot_cache import HubSpotCompany
 from .pitch_config import PitchTypeConfig
 from .pitch_target import PitchTarget
+from .pitch_target_override import PitchTargetOverride
 
 __all__ = [
     'User',
@@ -24,4 +25,5 @@ __all__ = [
     'HubSpotCompany',
     'PitchTypeConfig',
     'PitchTarget',
+    'PitchTargetOverride',
 ]

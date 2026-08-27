@@ -862,6 +862,54 @@ def wheel():
     )
 
 
+@pm_bp.route('/wheel/set-override', methods=['POST'])
+@login_required
+def wheel_set_override():
+    """Upsert a drag-to-reschedule override for one HubSpot-linked pitch target.
+
+    Writes to pitch_target_overrides (keyed on hubspot_id) and updates
+    pitch_targets.reach_out_1 immediately so the Wheel reflects the change
+    without waiting for the next sync. The sync engine re-applies overrides
+    after every DELETE+INSERT, so the override survives re-syncs.
+
+    Never writes to HubSpot — Portal-only override.
+    """
+    _require_access()
+
+    from datetime import date as date_type
+    import json
+    from app.models.pitch_target import PitchTarget
+    from app.models.pitch_target_override import PitchTargetOverride
+
+    data = request.get_json(silent=True) or {}
+    hubspot_id    = (data.get('hubspot_id') or '').strip()
+    outreach_date = (data.get('outreach_date') or '').strip()
+
+    if not hubspot_id:
+        return jsonify({'error': 'hubspot_id required'}), 400
+    try:
+        new_date = date_type.fromisoformat(outreach_date)
+    except ValueError:
+        return jsonify({'error': f'invalid date: {outreach_date!r}'}), 400
+
+    # Upsert the override record
+    override = PitchTargetOverride.query.get(hubspot_id)
+    if override is None:
+        override = PitchTargetOverride(hubspot_id=hubspot_id)
+        db.session.add(override)
+    override.outreach_date_override = new_date
+    override.override_set_by        = current_user.email
+    override.override_set_at        = datetime.utcnow()
+
+    # Apply immediately to pitch_targets so the Wheel reflects it without a sync
+    pt = PitchTarget.query.filter_by(hubspot_id=hubspot_id).first()
+    if pt:
+        pt.reach_out_1 = new_date
+
+    db.session.commit()
+    return jsonify({'ok': True, 'new_date': new_date.isoformat()})
+
+
 # ── Pitch type config admin (super_admin only) ───────────────────────────────────
 
 def _require_super_admin():
