@@ -342,12 +342,16 @@
       var el = draggingEl;
 
       var moveUrl = document.querySelector('.pm-header').dataset.moveUrl;
+      var _csrfToken = document.querySelector('meta[name="csrf-token"]').content;
       fetch(moveUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken },
         body: JSON.stringify({ hubspot_id: draggingId, to_stage: toStage })
       })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) { throw new Error('Server error ' + r.status); }
+        return r.json();
+      })
       .then(function (data) {
         if (data.ok) {
           // Move card in DOM and update its data-stage
@@ -364,8 +368,8 @@
           showToast(data.error || 'Move failed', true);
         }
       })
-      .catch(function () {
-        showToast('Network error — try again', true);
+      .catch(function (err) {
+        showToast((err.message || 'Network error') + ' — try again', true);
       });
 
       draggingId = draggingFrom = draggingEl = null;
@@ -390,11 +394,15 @@
     syncBtn.textContent = 'Syncing…';
 
     var syncUrl = document.querySelector('.pm-header').dataset.syncUrl;
+    var _csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     fetch(syncUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken },
     })
-    .then(function (r) { return r.json(); })
+    .then(function (r) {
+      if (!r.ok) { throw new Error('Server error ' + r.status); }
+      return r.json();
+    })
     .then(function (data) {
       if (data.ok) {
         showToast('Synced ' + data.count + ' companies — reload to see changes');
@@ -403,8 +411,8 @@
         showToast(data.error || 'Sync failed', true);
       }
     })
-    .catch(function () {
-      showToast('Sync failed — check connection', true);
+    .catch(function (err) {
+      showToast('Sync failed — ' + (err.message || 'check connection'), true);
     })
     .finally(function () {
       syncBtn.disabled = false;

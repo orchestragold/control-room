@@ -40,6 +40,9 @@ ROUTE_CHECKS = [
     '/projects/orchestra-gold/pitch-machine/review',
 ]
 
+BOARD_PATH = '/projects/orchestra-gold/pitch-machine'
+SYNC_PATH  = '/projects/orchestra-gold/pitch-machine/sync'
+
 BOLD  = '\033[1m'
 GREEN = '\033[32m'
 RED   = '\033[31m'
@@ -78,6 +81,26 @@ def get(path: str, cookie: str) -> tuple[int, str]:
     req = urllib.request.Request(
         f'{BASE_URL}{path}',
         headers={'Cookie': f'session={cookie}'},
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, resp.read().decode('utf-8', errors='replace')
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode('utf-8', errors='replace')
+
+
+def post_json(path: str, cookie: str, csrf: str) -> tuple[int, str]:
+    """POST with X-CSRFToken + Referer (Flask-WTF requires Referer for header-mode CSRF)."""
+    req = urllib.request.Request(
+        f'{BASE_URL}{path}',
+        data=b'{}',
+        headers={
+            'Cookie': f'session={cookie}',
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrf,
+            'Referer': BASE_URL + path,
+        },
+        method='POST',
     )
     try:
         with urllib.request.urlopen(req) as resp:
@@ -142,8 +165,8 @@ def extract_body(html: str, pid: str) -> str:
     return m.group(1).strip() if m else ''
 
 
-def check_routes(cookie: str) -> None:
-    """GET each main route and fail if any returns 500."""
+def check_routes(cookie: str, csrf: str) -> None:
+    """GET each main route; POST to sync. Fail on any 500."""
     print('Step 0: GET each main route (checking for import errors and crashes)...')
     for path in ROUTE_CHECKS:
         status, body = get(path, cookie)
@@ -153,6 +176,25 @@ def check_routes(cookie: str) -> None:
                 f'  Body preview: {body[:400]!r}'
             )
         ok(f'GET {path} → {status}')
+
+    # POST to sync — this path is never a GET, so the route checks above miss it.
+    # A non-JSON response (HTML error page) means the route 500d.
+    sync_status, sync_body = post_json(SYNC_PATH, cookie, csrf)
+    if sync_status == 500:
+        fail(
+            f'POST {SYNC_PATH} returned 500.\n'
+            f'  Body preview: {sync_body[:400]!r}'
+        )
+    try:
+        import json as _json
+        _json.loads(sync_body)
+        ok(f'POST {SYNC_PATH} → {sync_status} (JSON)')
+    except Exception:
+        fail(
+            f'POST {SYNC_PATH} returned {sync_status} but body is not JSON '
+            f'— server likely returned an HTML error page.\n'
+            f'  Body preview: {sync_body[:400]!r}'
+        )
     print()
 
 
@@ -162,10 +204,7 @@ def main() -> None:
 
     cookie = load_cookie()
 
-    # Step 0: verify no route returns 500
-    check_routes(cookie)
-
-    # Step 1: fetch the review page
+    # Step 1: fetch the review page (also provides the CSRF token for all checks)
     print('Step 1: GET review page...')
     status, html = get(REVIEW_PATH, cookie)
 
@@ -180,6 +219,9 @@ def main() -> None:
     if not csrf:
         fail('Could not extract CSRF token from <meta name="csrf-token">.')
     ok(f'CSRF token: {csrf[:12]}…')
+
+    # Step 2b: route checks — GET pages + POST sync (now that we have a CSRF token)
+    check_routes(cookie, csrf)
 
     # Step 3: find a pending draft
     pid = extract_first_approve_pid(html)
