@@ -31,6 +31,15 @@ BASE_URL = 'https://portal.orchestragold.com'
 REVIEW_PATH = '/projects/orchestra-gold/pitch-machine/review'
 COOKIE_FILE = Path(__file__).parent / '.smoke_session'
 
+# Routes checked on every deploy — any 500 here means a broken import or
+# crash-on-load that the unit tests can't see.
+ROUTE_CHECKS = [
+    '/projects/orchestra-gold/pitch-machine',
+    '/projects/orchestra-gold/pitch-machine/wheel',
+    '/projects/orchestra-gold/pitch-machine/draft-queue',
+    '/projects/orchestra-gold/pitch-machine/review',
+]
+
 BOLD  = '\033[1m'
 GREEN = '\033[32m'
 RED   = '\033[31m'
@@ -133,11 +142,28 @@ def extract_body(html: str, pid: str) -> str:
     return m.group(1).strip() if m else ''
 
 
+def check_routes(cookie: str) -> None:
+    """GET each main route and fail if any returns 500."""
+    print('Step 0: GET each main route (checking for import errors and crashes)...')
+    for path in ROUTE_CHECKS:
+        status, body = get(path, cookie)
+        if status == 500:
+            fail(
+                f'GET {path} returned 500 — broken import or crash-on-load.\n'
+                f'  Body preview: {body[:400]!r}'
+            )
+        ok(f'GET {path} → {status}')
+    print()
+
+
 def main() -> None:
     print(f'\n{BOLD}Portal smoke test{RESET}')
     print(f'Target: {BASE_URL}\n')
 
     cookie = load_cookie()
+
+    # Step 0: verify no route returns 500
+    check_routes(cookie)
 
     # Step 1: fetch the review page
     print('Step 1: GET review page...')
