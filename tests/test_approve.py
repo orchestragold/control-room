@@ -247,3 +247,77 @@ class TestNotAFit:
 
         assert response.status_code in (200, 302)
         mock_csv.assert_not_called()
+
+
+class TestScheduledAtMatchesSendDate:
+    """
+    The task's scheduled_at must be derived from send_date — 09:00 Pacific on
+    that date, converted to UTC.  "Set three lines apart" is not enforcement;
+    this test is.  If someone changes one without updating the other, the test
+    fails.
+    """
+
+    def test_future_send_date_sets_scheduled_at(self, app, db, client):
+        """approve() with a future send_date must write scheduled_at to the task."""
+        from datetime import date, datetime, timezone
+        from zoneinfo import ZoneInfo
+        from app.models.queue import APITaskQueue
+
+        pid = _make_pending_approval(app, db)
+
+        future_date = date(2026, 9, 11)
+        form = dict(APPROVE_FORM, send_date='2026-09-11')
+
+        with patch('app.pitch_machine.routes._remove_from_queue_sheet'):
+            with patch('app.pitch_machine.routes._write_hubspot_reach_out_1', return_value=None):
+                # local_today is imported inside approve() from app.utils.dates,
+                # so patch at the source module so the in-function import picks it up.
+                with patch('app.utils.dates.local_today', return_value=date(2026, 8, 28)):
+                    response = client.post(APPROVE_URL.format(pid=pid), data=form)
+
+        assert response.status_code in (200, 302)
+
+        with app.app_context():
+            task = APITaskQueue.query.filter_by(
+                platform='zoho_mail', task_type='send_pitch_touch1'
+            ).order_by(APITaskQueue.created_at.desc()).first()
+
+            assert task is not None, 'No task row created by approve()'
+            assert task.scheduled_at is not None, (
+                'scheduled_at is None for a future send_date — '
+                'process-queue will send immediately instead of waiting.'
+            )
+
+            # Expected: 09:00 Pacific on 2026-09-11 → 16:00 UTC (PDT = UTC-7)
+            expected_utc = datetime(2026, 9, 11, 16, 0, 0)
+            assert task.scheduled_at == expected_utc, (
+                f'scheduled_at={task.scheduled_at!r}, expected {expected_utc!r}. '
+                'send_date and scheduled_at are two representations of the same '
+                'intent — if one changes, the other must match.'
+            )
+
+    def test_same_day_send_date_does_not_set_scheduled_at(self, app, db, client):
+        """approve() with today's date as send_date must send immediately (no hold)."""
+        from datetime import date
+        from app.models.queue import APITaskQueue
+
+        pid = _make_pending_approval(app, db)
+        form = dict(APPROVE_FORM, send_date='2026-08-28')
+
+        with patch('app.pitch_machine.routes._remove_from_queue_sheet'):
+            with patch('app.pitch_machine.routes._write_hubspot_reach_out_1', return_value=None):
+                with patch('app.utils.dates.local_today', return_value=date(2026, 8, 28)):
+                    response = client.post(APPROVE_URL.format(pid=pid), data=form)
+
+        assert response.status_code in (200, 302)
+
+        with app.app_context():
+            task = APITaskQueue.query.filter_by(
+                platform='zoho_mail', task_type='send_pitch_touch1'
+            ).order_by(APITaskQueue.created_at.desc()).first()
+
+            assert task is not None
+            assert task.scheduled_at is None, (
+                f'scheduled_at={task.scheduled_at!r}; same-day approval should '
+                'send immediately with scheduled_at=None.'
+            )

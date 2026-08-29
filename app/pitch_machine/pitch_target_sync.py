@@ -240,8 +240,15 @@ def _apply_hubspot(record: dict, company: HubSpotCompany) -> None:
     record['website']          = record['website']     or company.website
     record['description']      = record['description'] or company.description
     record['reach_out_1']      = record['reach_out_1'] or company.reach_out_1
-    # No pitch_type default here. HubSpot-only companies stay None; only curated
-    # sources (spreadsheet, CSV) should assign a type — see _apply_spreadsheet.
+    # Assign Festival to HubSpot-only companies that have been actively worked:
+    # those with a reach_out_1 date OR a non-default stage (sent, in-negotiation,
+    # etc.). Plain needs-outreach companies with no date and no other curation
+    # stay pitch_type=None — they're the raw 'everything in HubSpot' population
+    # and don't belong on the Wheel until explicitly added to a curated source.
+    if not record['pitch_type']:
+        derived = derive_hs_stage(company.hs_lead_status, company.reach_out_1)
+        if derived != 'needs-outreach':
+            record['pitch_type'] = 'Festival'
 
 
 def _apply_spreadsheet(record: dict, row: dict) -> None:

@@ -695,12 +695,17 @@ def approve(pid: int):
         },
     ))
 
-    # Honour the requested send date: if it's in the future, schedule the task so
-    # process-queue holds it until that day.  Same-day or no-date → send immediately.
+    # Honour the requested send date: if it's in the future, hold the task until
+    # 09:00 Pacific on that day (converted to UTC so the server clock matches).
+    # Same-day or no-date → send immediately (scheduled_at stays None).
     from app.utils.dates import local_today as _local_today
+    from zoneinfo import ZoneInfo as _ZoneInfo
     _task_scheduled_at = None
     if send_date and send_date > _local_today():
-        _task_scheduled_at = datetime(send_date.year, send_date.month, send_date.day, 0, 0, 0)
+        _pacific = _ZoneInfo('America/Los_Angeles')
+        _local_send = datetime(send_date.year, send_date.month, send_date.day, 9, 0, 0,
+                               tzinfo=_pacific)
+        _task_scheduled_at = _local_send.astimezone(_ZoneInfo('UTC')).replace(tzinfo=None)
 
     db.session.add(APITaskQueue(
         platform      = 'zoho_mail',

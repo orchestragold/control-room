@@ -707,16 +707,22 @@ class TestGetStageDerivesHsStageEquivalence:
 
 class TestHubSpotOnlyPitchTypeDefault:
     """
-    _apply_hubspot() must NOT assign 'Festival' to HubSpot-only companies.
+    Untouched HubSpot-only companies (needs-outreach) stay pitch_type=None — they
+    are the raw 'everything in HubSpot' population and don't belong on the Wheel.
 
-    The default caused ~437 extra companies to appear on the Festival Wheel.
-    A HubSpot company with no spreadsheet or CSV row should have pitch_type=None;
-    the Wheel filters by pitch_type == selected_config.name, so None keeps it off
-    all wheels until a curated source explicitly assigns a type.
+    Actively-worked companies (queued = has reach_out_1, sent, in-negotiation, etc.)
+    get pitch_type='Festival' even if they never appeared in the spreadsheet, because
+    Erich chose to pitch them and they must remain visible on the Wheel.
     """
 
-    def test_hubspot_only_company_has_no_pitch_type(self, app, db):
-        """A company present only in HubSpot syncs with pitch_type=None."""
+    def test_untouched_hubspot_only_company_has_no_pitch_type(self, app, db):
+        """needs-outreach: hs_lead_status=None, no reach_out_1 → pitch_type=None.
+
+        hs_lead_status='NEW' maps to 'queued' in derive_hs_stage (it means Erich
+        has a send date planned for this company).  True untouched companies have
+        hs_lead_status=None — those are the raw 'everything in HubSpot' population
+        that must stay off the Wheel until a curated source claims them.
+        """
         from app.models.pitch_target import PitchTarget
 
         with app.app_context():
@@ -724,18 +730,62 @@ class TestHubSpotOnlyPitchTypeDefault:
             db.session.add(HubSpotCompany(
                 hubspot_id='hs-notype-001',
                 name='HubSpot Only Festival',
-                hs_lead_status='NEW',
+                hs_lead_status=None,
+                reach_out_1=None,
             ))
             db.session.commit()
 
             sync_pitch_targets(xlsx_bytes=None, csv_content=_EMPTY_CSV)
 
             t = PitchTarget.query.filter_by(name='HubSpot Only Festival').first()
-            assert t is not None, 'Sync should create a row for every HubSpot company'
+            assert t is not None
             assert t.pitch_type is None, (
-                f"Expected pitch_type=None for HubSpot-only company, got {t.pitch_type!r}. "
-                "Defaulting to 'Festival' floods the Wheel with every company in the account."
+                f"pitch_type={t.pitch_type!r}; untouched HubSpot company (hs_lead_status=None, "
+                "no reach_out_1) should stay None so it doesn't appear on the Wheel."
             )
-            assert t.source_hubspot is True
-            assert t.source_spreadsheet is False
-            assert t.source_queue_csv is False
+
+    def test_queued_hubspot_only_company_gets_festival(self, app, db):
+        """queued (has reach_out_1): actively worked → pitch_type='Festival'."""
+        from datetime import date
+        from app.models.pitch_target import PitchTarget
+
+        with app.app_context():
+            from app.models.hubspot_cache import HubSpotCompany
+            db.session.add(HubSpotCompany(
+                hubspot_id='hs-queued-001',
+                name='Queued HubSpot Festival',
+                hs_lead_status='NEW',
+                reach_out_1=date(2026, 10, 1),
+            ))
+            db.session.commit()
+
+            sync_pitch_targets(xlsx_bytes=None, csv_content=_EMPTY_CSV)
+
+            t = PitchTarget.query.filter_by(name='Queued HubSpot Festival').first()
+            assert t is not None
+            assert t.pitch_type == 'Festival', (
+                f"pitch_type={t.pitch_type!r}; an actively-queued company (reach_out_1 set) "
+                "must appear on the Wheel as Festival."
+            )
+
+    def test_sent_hubspot_only_company_gets_festival(self, app, db):
+        """sent (ATTEMPTED_TO_CONTACT): pitched via Portal → must stay visible."""
+        from app.models.pitch_target import PitchTarget
+
+        with app.app_context():
+            from app.models.hubspot_cache import HubSpotCompany
+            db.session.add(HubSpotCompany(
+                hubspot_id='hs-sent-001',
+                name='Sent HubSpot Festival',
+                hs_lead_status='ATTEMPTED_TO_CONTACT',
+            ))
+            db.session.commit()
+
+            sync_pitch_targets(xlsx_bytes=None, csv_content=_EMPTY_CSV)
+
+            t = PitchTarget.query.filter_by(name='Sent HubSpot Festival').first()
+            assert t is not None
+            assert t.pitch_type == 'Festival', (
+                f"pitch_type={t.pitch_type!r}; a sent company must remain on the "
+                "Wheel — removing it would hide a pitch that already went out."
+            )
