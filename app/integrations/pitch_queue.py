@@ -166,4 +166,5 @@ def _parse_date(value: str) -> Optional[date]:
 
 
 def _now_iso() -> str:
-    return date.today().isoformat()
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d')

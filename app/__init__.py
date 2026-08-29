@@ -85,6 +85,10 @@ def create_app(config_class=Config):
             APITaskQueue.query
             .filter_by(platform='zoho_mail', status='pending')
             .filter(APITaskQueue.retry_count < APITaskQueue.max_retries)
+            .filter(
+                (APITaskQueue.scheduled_at == None) |
+                (APITaskQueue.scheduled_at <= datetime.utcnow())
+            )
             .order_by(APITaskQueue.created_at)
             .limit(10)
             .all()

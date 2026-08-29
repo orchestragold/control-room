@@ -17,7 +17,7 @@ from flask import (
 from flask_login import current_user, login_required
 
 from app.core.mode import is_test_mode, resolve_email_recipient
-from app.extensions import csrf, db
+from app.extensions import db
 from app.utils.sanitize import sanitize_body_html
 from app.integrations.hubspot import (
     HubSpotClient,
@@ -43,7 +43,7 @@ pm_bp = Blueprint(
 )
 
 _DRAFT_QUEUE_MAX_SHOWN = 50
-_GENERATE_BATCH_LIMIT  = 5
+_GENERATE_BATCH_LIMIT  = 15
 _NEEDS_OUTREACH_CAP    = 15
 _DEFAULT_CC            = 'booking@orchestragold.com'
 
@@ -68,10 +68,14 @@ class QueueEntry:
     description:     Optional[str]
     notes:           Optional[str]
     has_pending_draft: bool = False
+    overdue:           bool = False
 
     @property
     def sort_key(self):
-        return self.send_date or date.max
+        if self.overdue:
+            # Past/missing deadline: float to top, most-overdue first
+            return (0, self.deadline or date.min)
+        return (1, self.send_date or date.max)
 
     @property
     def entry_id(self):
@@ -93,8 +97,9 @@ def _build_queue(companies: list) -> list[QueueEntry]:
         get_buyer_festival_dates,
         infer_is_european,
     )
+    from app.utils.dates import local_today
 
-    today = date.today()
+    today = local_today()
     entries: list[QueueEntry] = []
 
     # ── Source 1: HubSpot QUEUED companies with upcoming reach_out_1 ────────────
@@ -156,8 +161,6 @@ def _build_queue(companies: list) -> list[QueueEntry]:
             continue
         if item.name.lower() in not_a_fit_names:
             continue
-        if not item.deadline or item.deadline < today:
-            continue
         # Skip if this item is already represented by a HubSpot entry
         if item.hubspot_id and item.hubspot_id in existing_hs_ids:
             continue
@@ -165,10 +168,12 @@ def _build_queue(companies: list) -> list[QueueEntry]:
         if item.name.lower() in already_handled:
             continue
 
+        overdue = not item.deadline or item.deadline < today
+
         # Compute send date via algorithm
         if item.deadline:
             try:
-                if item.pitch_type == 'Festival':
+                if item.pitch_type.lower() == 'festival':
                     # Festival: send date = 8 months before the festival date
                     send_date = compute_send_date(
                         item.deadline,
@@ -194,6 +199,7 @@ def _build_queue(companies: list) -> list[QueueEntry]:
             website     = None,
             description = None,
             notes       = item.notes or None,
+            overdue     = overdue,
         ))
 
     entries.sort(key=lambda e: e.sort_key)
@@ -214,6 +220,16 @@ def board():
         companies = get_cached_companies()
     except HubSpotError as e:
         sync_error = str(e)
+
+    # Apply drag-to-reschedule overrides so the board and the Wheel show the same
+    # reach_out_1.  pitch_target_overrides is authoritative; hubspot_companies
+    # carries the raw HubSpot value which may lag until the next cache sync.
+    from app.models.pitch_target_override import PitchTargetOverride
+    overrides = {o.hubspot_id: o.outreach_date_override
+                 for o in PitchTargetOverride.query.all()}
+    for c in companies:
+        if c.hubspot_id in overrides:
+            c.reach_out_1 = overrides[c.hubspot_id]
 
     buckets: dict[PMStage, list] = defaultdict(list)
     company_by_hs_id: dict[str, object] = {}
@@ -279,7 +295,6 @@ def board():
 
 @pm_bp.route('/sync', methods=['POST'])
 @login_required
-@csrf.exempt
 def sync():
     _require_access()
     try:
@@ -291,7 +306,6 @@ def sync():
 
 @pm_bp.route('/move', methods=['POST'])
 @login_required
-@csrf.exempt
 def move():
     _require_access()
 
@@ -515,7 +529,6 @@ def generate():
 
 @pm_bp.route('/run-generate-next', methods=['POST'])
 @login_required
-@csrf.exempt
 def run_generate_next():
     _require_access()
     from datetime import datetime, timedelta
@@ -682,10 +695,18 @@ def approve(pid: int):
         },
     ))
 
+    # Honour the requested send date: if it's in the future, schedule the task so
+    # process-queue holds it until that day.  Same-day or no-date → send immediately.
+    from app.utils.dates import local_today as _local_today
+    _task_scheduled_at = None
+    if send_date and send_date > _local_today():
+        _task_scheduled_at = datetime(send_date.year, send_date.month, send_date.day, 0, 0, 0)
+
     db.session.add(APITaskQueue(
-        platform  = 'zoho_mail',
-        task_type = 'send_pitch_touch1',
-        payload   = {
+        platform      = 'zoho_mail',
+        task_type     = 'send_pitch_touch1',
+        scheduled_at  = _task_scheduled_at,
+        payload       = {
             'pitch_approval_id': pid,
             'to_email_intended': to_email,
             'to_email_actual':   actual_recipient,
@@ -830,18 +851,21 @@ def wheel():
     if selected_config is None and configs:
         selected_config = configs[0]
     if selected_config is None:
+        from app.utils.dates import local_today
         return render_template('pitch_machine/wheel.html', configs=[], selected_config=None,
-                               targets_json='{"active":[],"dormant":[]}', today=date.today().isoformat())
+                               targets_json='{"active":[],"dormant":[]}', today=local_today().isoformat())
 
     targets = PitchTarget.query.filter(
         PitchTarget.not_a_fit == False,
         PitchTarget.pitch_type == selected_config.name,
     ).all()
 
-    today = date.today()
+    from app.utils.dates import local_today
+    today = local_today()
+    this_year = today.year
     active, dormant = [], []
     for t in targets:
-        if t.reach_out_1:
+        if t.reach_out_1 and t.reach_out_1.year >= this_year:
             active.append({
                 'id':                  t.id,
                 'hubspot_id':          t.hubspot_id or '',
@@ -1021,7 +1045,6 @@ def config_edit(tid: int):
 
 @pm_bp.route('/config/<int:tid>/toggle', methods=['POST'])
 @login_required
-@csrf.exempt
 def config_toggle(tid: int):
     _require_super_admin()
     from app.models.pitch_config import PitchTypeConfig

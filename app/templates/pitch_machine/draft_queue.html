@@ -58,6 +58,8 @@
   .entry-row:last-child  { border-bottom: none; }
   .entry-row:hover       { background: #0e0e0e; }
   .entry-row.has-draft   { opacity: 0.4; cursor: default; }
+  .entry-row.overdue     { border-left: 2px solid #7d2222; background: #0d0808; }
+  .entry-row.overdue:hover { background: #130a0a; }
 
   .entry-check {
     margin-top: 3px;
@@ -74,7 +76,8 @@
     gap: 8px;
     flex-wrap: wrap;
   }
-  .entry-date   { font-size: 12px; color: #888; }
+  .entry-date         { font-size: 12px; color: #888; }
+  .entry-date-overdue { font-size: 12px; color: #dc2626; }
   .entry-source { font-size: 11px; color: #555; }
   .entry-notes  { font-size: 12px; color: #777; line-height: 1.4; }
 
@@ -213,7 +216,7 @@
 <form method="post" action="{{ url_for('pitch_machine.generate') }}" id="dq-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="dq-controls">
-    <span>{{ entries|length }} items queued — sorted by send date</span>
+    <span>{{ entries|length }} items queued — overdue first, then by send date</span>
     <button type="button" class="btn-link" id="select-all">select all</button>
     <button type="button" class="btn-link" id="select-none">none</button>
   </div>
@@ -221,7 +224,7 @@
   <div class="entry-list">
     {% for entry in entries %}
     {% set has_draft = entry.hubspot_id in existing_pending or entry.name in existing_pending %}
-    <label class="entry-row {% if has_draft %}has-draft{% endif %}"
+    <label class="entry-row {% if has_draft %}has-draft{% elif entry.overdue %}overdue{% endif %}"
            {% if has_draft %}title="Pending draft already exists"{% endif %}>
       <input type="checkbox"
              name="entry_id"
@@ -233,7 +236,9 @@
         <div class="entry-name">{{ entry.name }}</div>
         <div class="entry-meta">
           {% if entry.send_date %}
-          <span class="entry-date">Send {{ entry.send_date.strftime('%-m/%-d/%y') }}</span>
+          <span class="{{ 'entry-date-overdue' if entry.overdue else 'entry-date' }}">Send {{ entry.send_date.strftime('%-m/%-d/%y') }}</span>
+          {% elif entry.overdue %}
+          <span class="entry-date-overdue">no date</span>
           {% endif %}
           {% if entry.deadline %}
           <span class="entry-source">Festival {{ entry.deadline.strftime('%b %Y') }}</span>
@@ -367,9 +372,11 @@ function startProcessing() {
   });
 
   function processNext() {
+    var _csrfToken = document.querySelector('meta[name="csrf-token"]').content;
     fetch('{{ url_for("pitch_machine.run_generate_next") }}', {
       method: 'POST',
       credentials: 'same-origin',
+      headers: { 'X-CSRFToken': _csrfToken },
     })
     .then(function (r) {
       if (!r.ok) throw new Error('Server error ' + r.status);

@@ -240,8 +240,8 @@ def _apply_hubspot(record: dict, company: HubSpotCompany) -> None:
     record['website']          = record['website']     or company.website
     record['description']      = record['description'] or company.description
     record['reach_out_1']      = record['reach_out_1'] or company.reach_out_1
-    if not record['pitch_type']:
-        record['pitch_type'] = 'Festival'
+    # pitch_type stays None for HubSpot-only companies — the Wheel filters by pitch_type,
+    # so defaulting to 'Festival' would flood it with every company in the account.
 
 
 def _apply_spreadsheet(record: dict, row: dict) -> None:

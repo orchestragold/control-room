@@ -16,13 +16,17 @@
     padding: 2px 0 14px; flex-wrap: wrap; gap: 10px;
   }
 
-  .seg { display: flex; gap: 0; }
+  .seg { display: inline-flex; gap: 0; }
   .seg button {
     font-size: 10px; letter-spacing: .20em; text-transform: uppercase;
-    background: none; border: 1px solid #2a2a2a; border-right: none;
-    color: #888; padding: 7px 14px; cursor: pointer; font-family: inherit;
+    background: #0f0f0f; border: 1px solid #2a2a2a; border-right: none;
+    color: #666; padding: 7px 14px; cursor: pointer; font-family: inherit;
+    appearance: none; -webkit-appearance: none;
+    transition: color .15s, background .15s;
   }
-  .seg button:last-child { border-right: 1px solid #2a2a2a; }
+  .seg button:first-child { border-left: 1px solid #2a2a2a; }
+  .seg button:last-child  { border-right: 1px solid #2a2a2a; }
+  .seg button:hover:not(.on) { color: #aaa; background: #181818; }
   .seg button.on { color: #0a0a09; background: #8ab52f; border-color: #8ab52f; }
 
   .wh-type-label { font-size: 10px; letter-spacing: .26em; text-transform: uppercase; color: #5f7d28; }
@@ -106,7 +110,7 @@
 
 <div class="wh-stage">
   <div class="wh-canvas">
-    <svg id="viz" width="660" height="640" viewBox="0 0 660 640"></svg>
+    <svg id="viz" width="880" height="640" viewBox="0 0 880 640"></svg>
   </div>
 
   <div class="wh-rail">
@@ -165,7 +169,7 @@ function yearFraction(iso) {
   return (cur - start) / (end - start);
 }
 
-var CX = 330, CY = 306, R = 246;
+var CX = 440, CY = 306, R = 246;
 
 function frac2xy(frac, r) {
   var a = frac * 2 * Math.PI - Math.PI / 2;
@@ -494,7 +498,7 @@ if (SELECTED_CYCLICAL) {
     var mx = e.clientX - rect.left;
     var my = e.clientY - rect.top;
     /* SVG viewBox is 660x640; rect may be scaled */
-    var scaleX = 660 / rect.width;
+    var scaleX = 880 / rect.width;
     var scaleY = 640 / rect.height;
     var dx = (mx * scaleX) - CX;
     var dy = (my * scaleY) - CY;

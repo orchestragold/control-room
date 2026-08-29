@@ -659,3 +659,83 @@ class TestSyncRoundtrip:
         with app.app_context():
             result = sync_pitch_targets(xlsx_bytes=None, csv_content=_SAMPLE_CSV)
             assert result.not_a_fit_count == 1
+
+
+# ── get_stage / derive_hs_stage equivalence ───────────────────────────────────
+
+class TestGetStageDerivesHsStageEquivalence:
+    """
+    get_stage() (board path) and derive_hs_stage() (sync path) must always agree.
+
+    The comment in pitch_target_sync.py says "Mirrors get_stage() in stages.py
+    so the two never diverge — if stages.py changes, update here too."  This test
+    converts that comment into a guarantee.  It will fail if either function is
+    updated without updating the other.
+    """
+
+    # Every hs_lead_status value the app may see, plus None.
+    _STATUSES = [
+        None,
+        'NEW',
+        'ATTEMPTED_TO_CONTACT',
+        'CONNECTED',
+        'BAD_TIMING',
+        'UNQUALIFIED',
+        'OPEN_DEAL',
+        'OPEN',
+        'IN_PROGRESS',
+        'UNKNOWN_FUTURE_VALUE',   # unknown values must not crash either function
+    ]
+    _REACH_OUT_DATES = [None, date(2026, 11, 1)]
+
+    @pytest.mark.parametrize('hs_status', _STATUSES)
+    @pytest.mark.parametrize('reach_out_1', _REACH_OUT_DATES)
+    def test_both_functions_agree(self, hs_status, reach_out_1):
+        company = _make_company(hs_lead_status=hs_status, reach_out_1=reach_out_1)
+        board_stage = get_stage(company)
+        if board_stage is None:
+            return   # is_duplicate path — derive_hs_stage doesn't cover it
+
+        sync_stage = derive_hs_stage(hs_status, reach_out_1)
+        assert board_stage.value == sync_stage, (
+            f'get_stage and derive_hs_stage disagree for '
+            f'hs_lead_status={hs_status!r}, reach_out_1={reach_out_1}: '
+            f'get_stage → {board_stage.value!r}, '
+            f'derive_hs_stage → {sync_stage!r}'
+        )
+
+
+class TestHubSpotOnlyPitchTypeDefault:
+    """
+    _apply_hubspot() must NOT assign 'Festival' to HubSpot-only companies.
+
+    The default caused ~437 extra companies to appear on the Festival Wheel.
+    A HubSpot company with no spreadsheet or CSV row should have pitch_type=None;
+    the Wheel filters by pitch_type == selected_config.name, so None keeps it off
+    all wheels until a curated source explicitly assigns a type.
+    """
+
+    def test_hubspot_only_company_has_no_pitch_type(self, app, db):
+        """A company present only in HubSpot syncs with pitch_type=None."""
+        from app.models.pitch_target import PitchTarget
+
+        with app.app_context():
+            from app.models.hubspot_cache import HubSpotCompany
+            db.session.add(HubSpotCompany(
+                hubspot_id='hs-notype-001',
+                name='HubSpot Only Festival',
+                hs_lead_status='NEW',
+            ))
+            db.session.commit()
+
+            sync_pitch_targets(xlsx_bytes=None, csv_content=_EMPTY_CSV)
+
+            t = PitchTarget.query.filter_by(name='HubSpot Only Festival').first()
+            assert t is not None, 'Sync should create a row for every HubSpot company'
+            assert t.pitch_type is None, (
+                f"Expected pitch_type=None for HubSpot-only company, got {t.pitch_type!r}. "
+                "Defaulting to 'Festival' floods the Wheel with every company in the account."
+            )
+            assert t.source_hubspot is True
+            assert t.source_spreadsheet is False
+            assert t.source_queue_csv is False

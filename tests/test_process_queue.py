@@ -178,3 +178,100 @@ class TestC2NoDuplicateSend:
             f"send_email called {mock_send.call_count}× across two runs. "
             "Second run should have found no pending tasks — the task is 'completed'."
         )
+
+
+# ── Scheduled send ────────────────────────────────────────────────────────────
+
+class TestScheduledAt:
+    """process-queue must not fire tasks whose scheduled_at is in the future."""
+
+    def test_future_scheduled_task_not_sent(self, app, db, runner):
+        """A task with scheduled_at tomorrow must not be sent today."""
+        from datetime import timedelta
+        from unittest.mock import MagicMock, patch
+        from app.models.pitch import PitchApproval
+        from app.models.queue import APITaskQueue
+        from datetime import datetime
+
+        with app.app_context():
+            approval = PitchApproval(
+                hubspot_contact_id='', company_name='Future Festival',
+                pitch_type='Festival', touch_number=1,
+                draft_subject='Hi', draft_body='<p>Hello</p>',
+                to_email='x@y.com', cc_email='', status='approved',
+            )
+            db.session.add(approval)
+            db.session.flush()
+
+            task = APITaskQueue(
+                platform='zoho_mail', task_type='send_pitch_touch1',
+                status='pending',
+                scheduled_at=datetime.utcnow() + timedelta(days=1),
+                payload={
+                    'pitch_approval_id': approval.id,
+                    'to_email_actual': 'x@y.com',
+                    'to_email_intended': 'x@y.com',
+                    'subject': 'Hi', 'body': '<p>Hello</p>',
+                    'cc_email': '', 'was_redirected': False, 'send_date': None,
+                },
+            )
+            db.session.add(task)
+            db.session.commit()
+            task_id = task.id
+
+        mock_send = MagicMock(return_value={})
+        with patch('app.integrations.zoho_mail.send_email', mock_send):
+            runner.invoke(app.cli, ['process-queue'])
+
+        assert mock_send.call_count == 0, (
+            "send_email was called for a future-scheduled task — "
+            "process-queue must filter on scheduled_at <= NOW()."
+        )
+        with app.app_context():
+            t = db.session.get(APITaskQueue, task_id)
+            assert t.status == 'pending', (
+                f"Task status changed to {t.status!r}; it should remain 'pending' "
+                "until its scheduled_at date arrives."
+            )
+
+    def test_past_scheduled_task_is_sent(self, app, db, runner):
+        """A task with scheduled_at already past must be sent normally."""
+        from datetime import timedelta
+        from unittest.mock import MagicMock, patch
+        from app.models.pitch import PitchApproval
+        from app.models.queue import APITaskQueue
+        from datetime import datetime
+
+        with app.app_context():
+            approval = PitchApproval(
+                hubspot_contact_id='', company_name='Past Festival',
+                pitch_type='Festival', touch_number=1,
+                draft_subject='Hi', draft_body='<p>Hello</p>',
+                to_email='a@b.com', cc_email='', status='approved',
+            )
+            db.session.add(approval)
+            db.session.flush()
+
+            task = APITaskQueue(
+                platform='zoho_mail', task_type='send_pitch_touch1',
+                status='pending',
+                scheduled_at=datetime.utcnow() - timedelta(hours=1),
+                payload={
+                    'pitch_approval_id': approval.id,
+                    'to_email_actual': 'a@b.com',
+                    'to_email_intended': 'a@b.com',
+                    'subject': 'Hi', 'body': '<p>Hello</p>',
+                    'cc_email': '', 'was_redirected': False, 'send_date': None,
+                },
+            )
+            db.session.add(task)
+            db.session.commit()
+
+        mock_send = MagicMock(return_value={})
+        with patch('app.integrations.zoho_mail.send_email', mock_send):
+            runner.invoke(app.cli, ['process-queue'])
+
+        assert mock_send.call_count == 1, (
+            "send_email was not called for a past-scheduled task — "
+            "process-queue should send tasks whose scheduled_at has passed."
+        )

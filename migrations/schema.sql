@@ -302,3 +302,12 @@ CREATE TABLE IF NOT EXISTS pitch_targets (
 -- Run on production before deploying Phase 1 code.
 -- ALTER TABLE pitch_type_configs
 --   ADD COLUMN IF NOT EXISTS is_cyclical BOOLEAN NOT NULL DEFAULT TRUE AFTER active;
+
+-- ─── Phase 2 pre-work: fix pitch_type defaults and cyclical flags ─────────────
+-- 1. 'PNW Tour - Media' and 'Distribution' are one-off types — set is_cyclical=0
+--    so they render the linear timeline instead of the Wheel.
+-- 2. 'PNW' (Show Invite via PNW venues) has zero pitch_targets rows — deactivate
+--    until it has data, so it doesn't appear as an empty wheel in the switcher.
+-- Run on production before deploying Phase 2 code (or immediately — DB-only change).
+-- UPDATE pitch_type_configs SET is_cyclical = 0 WHERE name IN ('PNW Tour - Media', 'Distribution');
+-- UPDATE pitch_type_configs SET active = 0 WHERE name = 'PNW' AND (SELECT COUNT(*) FROM pitch_targets WHERE pitch_type = 'PNW') = 0;
