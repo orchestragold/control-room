@@ -141,9 +141,11 @@
 
 <script>
 var _toggleBase = '{{ url_for("pitch_machine.config_toggle", tid=0) }}'.replace('/0/', '/');
+var _csrfToken  = document.querySelector('meta[name="csrf-token"]').content;
 function toggleType(id, btn) {
   fetch(_toggleBase + id + '/toggle', {
     method: 'POST', credentials: 'same-origin',
+    headers: { 'X-CSRFToken': _csrfToken },
   })
   .then(r => r.json())
   .then(data => {
