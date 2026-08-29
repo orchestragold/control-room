@@ -240,8 +240,8 @@ def _apply_hubspot(record: dict, company: HubSpotCompany) -> None:
     record['website']          = record['website']     or company.website
     record['description']      = record['description'] or company.description
     record['reach_out_1']      = record['reach_out_1'] or company.reach_out_1
-    # pitch_type stays None for HubSpot-only companies — the Wheel filters by pitch_type,
-    # so defaulting to 'Festival' would flood it with every company in the account.
+    # No pitch_type default here. HubSpot-only companies stay None; only curated
+    # sources (spreadsheet, CSV) should assign a type — see _apply_spreadsheet.
 
 
 def _apply_spreadsheet(record: dict, row: dict) -> None:
@@ -249,7 +249,9 @@ def _apply_spreadsheet(record: dict, row: dict) -> None:
     record['spreadsheet_status'] = row.get('status')
     record['spreadsheet_row']    = row.get('row')
     record['website']            = record['website']    or row.get('website')
-    record['pitch_type']         = record['pitch_type'] or row.get('pitch_type')
+    # The Festival Outreach XLSX often has no Pitch Type column (all rows are Festival
+    # by definition). Default here so HubSpot-only companies stay pitch_type=None.
+    record['pitch_type']         = record['pitch_type'] or row.get('pitch_type') or 'Festival'
     raw_dl = row.get('submission_deadline')
     if raw_dl and not record['submission_deadline']:
         record['submission_deadline'] = _parse_date_value(raw_dl)
