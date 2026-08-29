@@ -15,7 +15,7 @@ RESET='\033[0m'
 
 SERVER="j9dc6uyrssfn@198.12.233.20"
 SSH_KEY="$HOME/.ssh/id_ed25519"
-REMOTE_APP="$HOME/control-room"
+REMOTE_APP="~/control-room"   # evaluated on the server, not locally
 
 echo -e "\n${BOLD}Deploy → portal.orchestragold.com${RESET}"
 
@@ -38,7 +38,7 @@ git push origin main
 # 3. Pull on the server and restart Passenger.
 echo "Pulling on server and restarting..."
 ssh -i "$SSH_KEY" "$SERVER" \
-  "cd $REMOTE_APP && git pull origin main && touch tmp/restart.txt"
+  'cd ~/control-room && git pull origin main && touch tmp/restart.txt'
 
 # 4. Give Passenger a moment to spawn the new worker.
 sleep 4
