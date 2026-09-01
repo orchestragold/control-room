@@ -218,7 +218,8 @@
 {% block content %}
 <div class="pm-header"
      data-move-url="{{ url_for('pitch_machine.move') }}"
-     data-sync-url="{{ url_for('pitch_machine.sync') }}">
+     data-sync-url="{{ url_for('pitch_machine.sync') }}"
+     data-scan-replies-url="{{ url_for('pitch_machine.scan_replies') }}">
   <h1 class="pm-title">Pitch Machine</h1>
   <div class="pm-meta">
     {% if pending_count %}
@@ -231,7 +232,12 @@
     <span class="sync-age" id="sync-age">Synced {{ sync_age }}</span>
     {% endif %}
     <button class="btn-ghost" id="sync-btn">Sync</button>
+    <button class="btn-ghost" id="scan-replies-btn">Scan replies</button>
   </div>
+</div>
+
+<div id="replies-panel" style="display:none;margin:12px 0;padding:12px 16px;background:#050505;border:1px solid #1a1a1a;border-radius:4px;font-size:12px;color:#888;">
+  <div id="replies-content"></div>
 </div>
 
 {% if sync_error %}
@@ -419,6 +425,74 @@
       syncBtn.textContent = 'Sync';
     });
   });
+
+  // ── Scan replies button ─────────────────────────────────────────────────────
+  var scanBtn    = document.getElementById('scan-replies-btn');
+  var repliesPanel   = document.getElementById('replies-panel');
+  var repliesContent = document.getElementById('replies-content');
+  var scanUrl    = document.querySelector('.pm-header').dataset.scanRepliesUrl;
+  var csrfToken  = document.querySelector('meta[name="csrf-token"]').content;
+
+  scanBtn.addEventListener('click', function () {
+    scanBtn.disabled = true;
+    scanBtn.textContent = 'Scanning…';
+    repliesPanel.style.display = 'none';
+
+    fetch(scanUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days_back: 90 }),
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data.ok) {
+        repliesContent.textContent = 'Error: ' + (data.error || 'unknown');
+        repliesPanel.style.display = 'block';
+        return;
+      }
+      if (data.matches.length === 0) {
+        repliesContent.textContent =
+          'No replies found. Scanned ' + data.scanned + ' inbox messages against ' +
+          data.pitched_addresses + ' pitched addresses.';
+        repliesPanel.style.display = 'block';
+        return;
+      }
+      var html = '<strong style="color:#ccc">' + data.matches.length + ' repl' +
+        (data.matches.length === 1 ? 'y' : 'ies') + ' detected</strong>' +
+        ' <span style="color:#444">(scanned ' + data.scanned + ' messages, ' +
+        data.pitched_addresses + ' pitched addresses)</span><br><br>';
+      data.matches.forEach(function (m) {
+        html += '<div style="margin-bottom:10px;padding:8px 10px;border:1px solid #1a1a1a;border-radius:3px;">';
+        html += '<span style="color:#888">' + (m.received_at ? m.received_at.slice(0,10) : '') + '</span> ';
+        html += '<span style="color:#ccc">' + escapeHtml(m.name) + '</span>';
+        html += ' <span style="color:#555">(' + escapeHtml(m.pitch_type) + ')</span><br>';
+        html += '<span style="color:#555">From: ' + escapeHtml(m.from_address) + '</span><br>';
+        html += '<span style="color:#555">Subject: ' + escapeHtml(m.subject) + '</span>';
+        if (m.promote_url) {
+          html += '<br><a href="' + escapeHtml(m.promote_url.replace('/promote-to-hubspot/', '/review#promote-')) +
+            '" style="color:#4a6a9a;font-size:11px;">→ Promote to HubSpot (go to Review page)</a>';
+        } else if (m.hubspot_contact_id) {
+          html += '<br><span style="color:#3a5a3a;font-size:11px;">✓ Already in HubSpot</span>';
+        }
+        html += '</div>';
+      });
+      repliesContent.innerHTML = html;
+      repliesPanel.style.display = 'block';
+    })
+    .catch(function (err) {
+      repliesContent.textContent = 'Scan failed — ' + (err.message || 'check connection');
+      repliesPanel.style.display = 'block';
+    })
+    .finally(function () {
+      scanBtn.disabled = false;
+      scanBtn.textContent = 'Scan replies';
+    });
+  });
+
+  function escapeHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
 
 })();
 </script>

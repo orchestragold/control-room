@@ -938,6 +938,94 @@ def promote_to_hubspot(pid: int):
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
+# ── Scan Zoho inbox for replies to pitched addresses ─────────────────────────────
+
+@pm_bp.route('/scan-replies', methods=['POST'])
+@login_required
+def scan_replies():
+    """
+    Scan the Zoho inbox for messages from addresses that appear in pitch_queue.csv
+    with status='pitched', or in PitchApproval records (to_email) with status='sent'.
+    Returns matches as JSON — does NOT auto-promote. Human clicks to confirm.
+
+    Same trigger pattern as Sync Knowledge: POST endpoint, call manually or via cron.
+    """
+    _require_access()
+    from datetime import datetime, timedelta
+    from app.integrations.zoho_mail import ZohoError, list_inbox_messages
+    from app.integrations.dropbox_sync import get_or_create_queue_csv
+    from app.integrations.pitch_queue import parse_queue
+
+    days_back = int(request.json.get('days_back', 90) if request.is_json else 90)
+
+    # Build the set of pitched addresses from both sources.
+    # Source 1: pitch_queue.csv rows with status='pitched'
+    pitched_emails: dict[str, dict] = {}
+    try:
+        items = parse_queue(get_or_create_queue_csv())
+        for item in items:
+            if item.status == 'pitched' and item.email_address:
+                addr = item.email_address.lower().strip()
+                if addr:
+                    pitched_emails[addr] = {
+                        'name':       item.name,
+                        'pitch_type': item.pitch_type,
+                        'source':     'queue_csv',
+                    }
+    except Exception:
+        pass
+
+    # Source 2: Portal PitchApproval records with status='sent'
+    for a in PitchApproval.query.filter_by(status='sent').all():
+        if a.to_email:
+            addr = a.to_email.lower().strip()
+            if addr and addr not in pitched_emails:
+                pitched_emails[addr] = {
+                    'name':       a.company_name,
+                    'pitch_type': a.pitch_type,
+                    'source':     'portal',
+                    'pid':        a.id,
+                    'hubspot_contact_id': a.hubspot_contact_id or '',
+                }
+
+    if not pitched_emails:
+        return jsonify({'ok': True, 'matches': [], 'scanned': 0,
+                        'pitched_addresses': 0, 'message': 'No pitched addresses found.'})
+
+    try:
+        inbox = list_inbox_messages(days_back=days_back)
+    except ZohoError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
+
+    matches = []
+    for msg in inbox:
+        addr = msg['from_address']
+        if addr in pitched_emails:
+            entry = pitched_emails[addr]
+            matches.append({
+                'from_address': addr,
+                'subject':      msg['subject'],
+                'received_at':  msg['received_at'].isoformat() if msg['received_at'] else None,
+                'message_id':   msg['message_id'],
+                'name':         entry['name'],
+                'pitch_type':   entry.get('pitch_type', ''),
+                'source':       entry['source'],
+                'pid':          entry.get('pid'),
+                'hubspot_contact_id': entry.get('hubspot_contact_id', ''),
+                'promote_url':  url_for(
+                    'pitch_machine.promote_to_hubspot',
+                    pid=entry['pid'],
+                ) if entry.get('pid') and not entry.get('hubspot_contact_id') else None,
+            })
+
+    return jsonify({
+        'ok':                True,
+        'scanned':           len(inbox),
+        'pitched_addresses': len(pitched_emails),
+        'matches':           matches,
+    })
+
+
 # ── The Wheel ────────────────────────────────────────────────────────────────────
 
 @pm_bp.route('/wheel')

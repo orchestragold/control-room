@@ -209,6 +209,87 @@ def list_sent_messages(days_back: int = 90) -> list[dict]:
     return messages
 
 
+def list_inbox_messages(days_back: int = 90) -> list[dict]:
+    """
+    Return received messages from the last `days_back` days in the Inbox.
+    Each item: {'from_address': str, 'subject': str, 'received_at': datetime|None, 'message_id': str}
+
+    Used for reply detection: scan for senders matching pitched email addresses.
+    """
+    from datetime import datetime, timedelta
+
+    access_token = _get_access_token()
+    account_id   = get_account_id(access_token)
+    cutoff_ms    = int((datetime.utcnow() - timedelta(days=days_back)).timestamp() * 1000)
+    email_pat    = re.compile(r'[\w._%+\-]+@[\w.\-]+\.[a-zA-Z]{2,}')
+
+    folders_resp = requests.get(
+        f'https://mail.zoho.com/api/accounts/{account_id}/folders',
+        headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
+        timeout=15,
+    )
+    folders_resp.raise_for_status()
+    inbox_folder_id = next(
+        (f['folderId'] for f in folders_resp.json().get('data', [])
+         if f.get('folderName', '').lower() == 'inbox'),
+        None,
+    )
+    if not inbox_folder_id:
+        raise ZohoError('Could not find Inbox folder in Zoho account')
+
+    PAGE_SIZE = 200
+    messages  = []
+    start     = 0
+    seen_ids  = set()
+
+    while True:
+        resp = requests.get(
+            f'https://mail.zoho.com/api/accounts/{account_id}/messages/view',
+            headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
+            params={'folderId': inbox_folder_id, 'limit': PAGE_SIZE, 'start': start},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        page = resp.json().get('data', [])
+        if not page:
+            break
+
+        hit_cutoff = False
+        for msg in page:
+            ts  = msg.get('receivedTime') or msg.get('sentDateInGMT') or '0'
+            mid = str(msg.get('messageId', ''))
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+
+            if int(ts) < cutoff_ms:
+                hit_cutoff = True
+                break
+
+            from_raw   = msg.get('fromAddress', '')
+            m          = email_pat.search(from_raw)
+            from_email = m.group(0).lower() if m else from_raw.lower().strip()
+
+            received_at = None
+            try:
+                received_at = datetime.utcfromtimestamp(int(ts) / 1000)
+            except Exception:
+                pass
+
+            messages.append({
+                'from_address': from_email,
+                'subject':      msg.get('subject', ''),
+                'received_at':  received_at,
+                'message_id':   mid,
+            })
+
+        if hit_cutoff or len(page) < PAGE_SIZE:
+            break
+        start += PAGE_SIZE
+
+    return messages
+
+
 def _build_html(body: str) -> str:
     """
     Wrap the pitch body in Tahoma 12pt, convert newlines to <br>,
