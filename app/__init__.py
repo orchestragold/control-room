@@ -665,7 +665,14 @@ def create_app(config_class=Config):
             name = _re.sub(r'^\[DUPLICATE[^\]]*\]\s*', '', name, flags=_re.IGNORECASE)
             # Lowercase, replace non-alphanumeric with space, collapse whitespace
             name = _re.sub(r'[^\w]', ' ', name.lower())
-            return _re.sub(r'\s+', ' ', name).strip()
+            name = _re.sub(r'\s+', ' ', name).strip()
+            # Strip trailing common suffixes so "Noise Pop Festival" == "Noise Pop Fest"
+            # == "Noise Pop". Order matters — strip longest first.
+            for suffix in ('music festival', 'jazz festival', 'music fest', 'festival', 'fest'):
+                if name.endswith(' ' + suffix):
+                    name = name[: -(len(suffix) + 1)].rstrip()
+                    break
+            return name
 
         def _score(c) -> int:
             """Higher = more data = better candidate to keep."""
