@@ -75,6 +75,21 @@ class HubSpotClient:
             'Content-Type': 'application/json',
         }
 
+    @staticmethod
+    def _raise(resp) -> None:
+        """Wrap requests.HTTPError in HubSpotError so callers only catch one type."""
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            body = ''
+            try:
+                body = resp.json().get('message', '') or resp.text[:300]
+            except Exception:
+                body = resp.text[:300]
+            raise HubSpotError(
+                f'HubSpot {resp.status_code} on {resp.url}: {body}'
+            ) from exc
+
     def _get(self, path: str, params: dict | None = None) -> dict:
         if not self._throttle.can_call():
             raise HubSpotError(
@@ -87,7 +102,7 @@ class HubSpotClient:
             params=params,
             timeout=20,
         )
-        resp.raise_for_status()
+        self._raise(resp)
         return resp.json()
 
     def _patch(self, path: str, body: dict) -> dict:
@@ -102,7 +117,7 @@ class HubSpotClient:
             json=body,
             timeout=20,
         )
-        resp.raise_for_status()
+        self._raise(resp)
         return resp.json()
 
     def _post(self, path: str, body: dict) -> dict:
@@ -117,7 +132,7 @@ class HubSpotClient:
             json=body,
             timeout=20,
         )
-        resp.raise_for_status()
+        self._raise(resp)
         return resp.json()
 
     # ── Public API ──────────────────────────────────────────────────────────────
@@ -241,7 +256,7 @@ class HubSpotClient:
             headers=self._headers(),
             timeout=20,
         )
-        resp.raise_for_status()
+        self._raise(resp)
 
     def create_contact_note(
         self,

@@ -601,7 +601,14 @@
         credentials: 'same-origin',
         headers: { 'X-CSRFToken': csrfToken },
       })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) {
+          return r.text().then(function (body) {
+            throw new Error('HTTP ' + r.status + ' — ' + body.slice(0, 300));
+          });
+        }
+        return r.json();
+      })
       .then(function (data) {
         if (data.ok) {
           var row = document.getElementById('promote-row-' + pid);
