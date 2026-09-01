@@ -632,9 +632,26 @@ def review():
         .all()
     )
 
+    # Pitches that were sent/approved through the Portal as queue-sheet (qs:) items
+    # but have no HubSpot record yet. "Promote to HubSpot" button surfaces here so
+    # Erich can link them after meeting someone at a showcase.
+    promotable = (
+        PitchApproval.query
+        .filter(PitchApproval.status.in_(['approved', 'sent']))
+        .filter(
+            (PitchApproval.hubspot_contact_id == None) |
+            (PitchApproval.hubspot_contact_id == '')
+        )
+        .filter(PitchApproval.to_email != '')
+        .filter(PitchApproval.to_email != None)
+        .order_by(PitchApproval.send_date.desc())
+        .all()
+    )
+
     return render_template(
         'pitch_machine/review.html',
         drafts=pending,
+        promotable=promotable,
         test_mode=is_test_mode(),
         redirect_email=_get_redirect_email_display(),
         type_colors=_get_type_colors(),
@@ -834,6 +851,91 @@ def not_a_fit(pid: int):
         msg += f' Reason: {reason}'
     flash(msg, 'success')
     return redirect(url_for('pitch_machine.review'))
+
+
+# ── Promote queue-sheet pitch to HubSpot ─────────────────────────────────────────
+
+@pm_bp.route('/promote-to-hubspot/<int:pid>', methods=['POST'])
+@login_required
+def promote_to_hubspot(pid: int):
+    """
+    Create HubSpot Contact + Company records for a queue-sheet (qs:) pitch and
+    log an engagement note recording the send. Does not write reach_out_1 —
+    the engagement note is the unambiguous actual-send record.
+
+    Used when Erich meets someone at a showcase (e.g. WAA) and wants their
+    Portal-sent pitch to be visible in the CRM before they reply.
+    """
+    _require_access()
+    from app.integrations.hubspot import HubSpotClient, HubSpotError
+
+    approval = PitchApproval.query.get_or_404(pid)
+    if approval.hubspot_contact_id:
+        return jsonify({'ok': False, 'error': 'Already in HubSpot.'}), 400
+    if not approval.to_email:
+        return jsonify({'ok': False, 'error': 'No recipient email on this draft.'}), 400
+    if approval.status not in ('approved', 'sent', 'pending'):
+        return jsonify({'ok': False, 'error': f'Unexpected status: {approval.status}'}), 400
+
+    try:
+        client = HubSpotClient()
+        created_company = False
+        created_contact = False
+
+        # 1. Find or create Company
+        company_id = client.search_company_by_name(approval.company_name)
+        if not company_id:
+            company_id = client.create_company(approval.company_name)
+            created_company = True
+
+        # 2. Find or create Contact
+        contact_id = client.search_contact_by_email(approval.to_email)
+        if not contact_id:
+            contact_id = client.create_contact(approval.to_email, approval.company_name)
+            created_contact = True
+
+        # 3. Associate Contact → Company
+        client.associate_contact_to_company(contact_id, company_id)
+
+        # 4. Log the engagement note — this is the actual-send record.
+        #    Deliberately NOT writing reach_out_1; the note is unambiguous.
+        send_date_str = approval.send_date.isoformat() if approval.send_date else 'date unknown'
+        note_body = (
+            f'Pitch sent via Portal ({send_date_str})\n'
+            f'Subject: {approval.draft_subject}\n'
+            f'Type: {approval.pitch_type} · Touch {approval.touch_number}\n'
+            f'Promoted to HubSpot by {current_user.name or current_user.email}.'
+        )
+        client.create_contact_note(contact_id, company_id, note_body)
+
+        # 5. Record the HubSpot contact ID on the approval so future pages know it's linked.
+        approval.hubspot_contact_id = contact_id
+        db.session.add(ApprovalLog(
+            approver_id = current_user.id,
+            action      = 'promoted_to_hubspot',
+            entity_type = 'pitch_approval',
+            entity_id   = str(pid),
+            details     = {
+                'company_name':    approval.company_name,
+                'to_email':        approval.to_email,
+                'contact_id':      contact_id,
+                'company_id':      company_id,
+                'created_company': created_company,
+                'created_contact': created_contact,
+            },
+        ))
+        db.session.commit()
+
+        return jsonify({
+            'ok':             True,
+            'contact_id':     contact_id,
+            'company_id':     company_id,
+            'created_company': created_company,
+            'created_contact': created_contact,
+        })
+
+    except HubSpotError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
 
 
 # ── The Wheel ────────────────────────────────────────────────────────────────────

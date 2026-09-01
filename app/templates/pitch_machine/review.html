@@ -255,6 +255,38 @@
     .compose-col  { border-right: none; border-bottom: 1px solid #161616; }
     .research-col { max-height: 280px; }
   }
+
+  /* ── Promote to HubSpot section ──────────────────────────────────────────────── */
+  .promotable-section {
+    margin: 40px 0 0;
+    border-top: 1px solid #1a1a1a;
+    padding-top: 24px;
+  }
+  .promotable-heading {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #444; margin: 0 0 8px;
+  }
+  .promotable-note {
+    font-size: 12px; color: #555; margin: 0 0 16px; line-height: 1.5;
+  }
+  .promotable-table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  .promotable-table th {
+    text-align: left; color: #333; font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 4px 10px 8px; border-bottom: 1px solid #1a1a1a;
+  }
+  .promotable-table td {
+    padding: 8px 10px; border-bottom: 1px solid #111; color: #888; vertical-align: middle;
+  }
+  .btn-promote {
+    background: none; border: 1px solid #1a1a2a; color: #4a6a9a;
+    font-size: 12px; padding: 5px 12px; border-radius: 3px; cursor: pointer;
+    transition: border-color 0.1s, color 0.1s;
+    white-space: nowrap;
+  }
+  .btn-promote:hover  { border-color: #3a5a8a; color: #8ab4e4; }
+  .btn-promote:disabled { opacity: 0.4; cursor: default; }
 </style>
 {% endblock %}
 
@@ -398,6 +430,37 @@
 
 {% endif %}
 
+{% if promotable %}
+<div class="promotable-section">
+  <h2 class="promotable-heading">Promote to HubSpot</h2>
+  <p class="promotable-note">
+    These pitches were sent through the Portal but have no HubSpot record yet.
+    Use this after meeting someone at a showcase to link the pitch to the CRM.
+  </p>
+  <table class="promotable-table">
+    <thead>
+      <tr><th>Date</th><th>Company</th><th>Type</th><th>To</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for a in promotable %}
+    <tr id="promote-row-{{ a.id }}">
+      <td>{{ a.send_date or '—' }}</td>
+      <td>{{ a.company_name }}</td>
+      <td><span class="type-badge" style="color:{{ type_colors.get(a.pitch_type, '#888') }}">{{ a.pitch_type }}</span></td>
+      <td>{{ a.to_email }}</td>
+      <td>
+        <button class="btn-promote" data-pid="{{ a.id }}"
+                data-url="{{ url_for('pitch_machine.promote_to_hubspot', pid=a.id) }}">
+          Promote to HubSpot
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <script>
 (function () {
   // Decode HTML entities in plain-text bodies so symbols render correctly.
@@ -525,6 +588,42 @@
       postForm(rejectAllBtn.dataset.url);
     });
   }
+
+  // Promote to HubSpot
+  document.querySelectorAll('.btn-promote').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pid  = btn.dataset.pid;
+      var url  = btn.dataset.url;
+      btn.disabled = true;
+      btn.textContent = 'Promoting…';
+      fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': csrfToken },
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.ok) {
+          var row = document.getElementById('promote-row-' + pid);
+          var parts = [];
+          if (data.created_company) parts.push('company created');
+          if (data.created_contact) parts.push('contact created');
+          if (!data.created_company && !data.created_contact) parts.push('matched existing records');
+          btn.textContent = 'In HubSpot ✓ (' + parts.join(', ') + ')';
+          btn.style.color = '#5aaa7a';
+          btn.style.borderColor = '#1a3a2a';
+        } else {
+          btn.textContent = 'Error: ' + (data.error || 'unknown');
+          btn.disabled = false;
+          btn.style.color = '#f87171';
+        }
+      })
+      .catch(function () {
+        btn.textContent = 'Network error — try again';
+        btn.disabled = false;
+      });
+    });
+  });
 })();
 </script>
 {% endblock %}

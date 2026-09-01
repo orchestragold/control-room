@@ -181,6 +181,92 @@ class HubSpotClient:
             }],
         })
 
+    # ── Contact and Company creation (used by promote-to-hubspot) ────────────────
+
+    def search_contact_by_email(self, email: str) -> Optional[str]:
+        """Return the HubSpot Contact ID for the given email, or None if not found."""
+        data = self._post('/crm/v3/objects/contacts/search', {
+            'filterGroups': [{'filters': [{
+                'propertyName': 'email',
+                'operator':     'EQ',
+                'value':        email.lower(),
+            }]}],
+            'properties': ['email'],
+            'limit': 1,
+        })
+        results = data.get('results', [])
+        return str(results[0]['id']) if results else None
+
+    def create_contact(self, email: str, company_name: str) -> str:
+        """
+        Create a HubSpot Contact and return its ID.
+        Sets email and company (display name). First/last name left blank —
+        Erich can fill them in; wrong names are harder to correct than missing ones.
+        """
+        result = self._post('/crm/v3/objects/contacts', {
+            'properties': {
+                'email':   email.lower(),
+                'company': company_name,
+            },
+        })
+        return str(result['id'])
+
+    def search_company_by_name(self, name: str) -> Optional[str]:
+        """Return the HubSpot Company ID for the given name, or None if not found."""
+        data = self._post('/crm/v3/objects/companies/search', {
+            'filterGroups': [{'filters': [{
+                'propertyName': 'name',
+                'operator':     'EQ',
+                'value':        name,
+            }]}],
+            'properties': ['name'],
+            'limit': 1,
+        })
+        results = data.get('results', [])
+        return str(results[0]['id']) if results else None
+
+    def create_company(self, name: str, city: Optional[str] = None) -> str:
+        """Create a HubSpot Company and return its ID."""
+        props: dict = {'name': name}
+        if city:
+            props['city'] = city
+        result = self._post('/crm/v3/objects/companies', {'properties': props})
+        return str(result['id'])
+
+    def associate_contact_to_company(self, contact_id: str, company_id: str) -> None:
+        """Create the default Contact→Company association in HubSpot."""
+        import requests as _req
+        resp = _req.put(
+            f'{_BASE_URL}/crm/v4/objects/contact/{contact_id}/associations/default/company/{company_id}',
+            headers=self._headers(),
+            timeout=20,
+        )
+        resp.raise_for_status()
+
+    def create_contact_note(
+        self,
+        contact_id: str,
+        company_id: Optional[str],
+        body: str,
+    ) -> dict:
+        """
+        Create a Note associated to a Contact (and optionally a Company).
+        associationTypeId 202 = note_to_contact (HubSpot-defined).
+        associationTypeId 190 = note_to_company.
+        """
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        associations = [{'to': {'id': contact_id},
+                         'types': [{'associationCategory': 'HUBSPOT_DEFINED',
+                                    'associationTypeId': 202}]}]
+        if company_id:
+            associations.append({'to': {'id': company_id},
+                                  'types': [{'associationCategory': 'HUBSPOT_DEFINED',
+                                             'associationTypeId': 190}]})
+        return self._post('/crm/v3/objects/notes', {
+            'properties': {'hs_note_body': body, 'hs_timestamp': str(now_ms)},
+            'associations': associations,
+        })
+
 
 # ── Cache sync ──────────────────────────────────────────────────────────────────
 

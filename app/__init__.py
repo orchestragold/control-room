@@ -554,6 +554,69 @@ def create_app(config_class=Config):
 
         print(f'Finished: {succeeded} succeeded, {failed} failed.')
 
+    @app.cli.command('pitch-untracked-sends')
+    def pitch_untracked_sends_command():
+        """D1 diagnostic: HubSpot companies with reach_out_1 set but no Portal PitchApproval.
+
+        These are either legacy 2025 planning-calendar dates (pre-2026), Gmail-sent pitches
+        the Portal never saw, or Zoho sends the follow-up engine stamped but the Portal has
+        no record of. Used to distinguish real sends from planning noise before the engine
+        can safely key off reach_out_1.
+        """
+        from datetime import date as _date
+        from app.models.hubspot_cache import HubSpotCompany
+        from app.models.pitch import PitchApproval
+
+        companies = (
+            HubSpotCompany.query
+            .filter(HubSpotCompany.reach_out_1 != None)
+            .order_by(HubSpotCompany.reach_out_1)
+            .all()
+        )
+        if not companies:
+            print('No HubSpot companies have reach_out_1 set.')
+            return
+
+        # Build index of hubspot_ids that have a Portal PitchApproval (any status)
+        sent_hs_ids = {
+            row.hubspot_contact_id
+            for row in PitchApproval.query
+            .filter(PitchApproval.hubspot_contact_id != '')
+            .filter(PitchApproval.hubspot_contact_id != None)
+            .all()
+        }
+
+        legacy  = []
+        untracked = []
+        portal_matched = []
+
+        cutoff = _date(2026, 1, 1)
+        for c in companies:
+            if c.hubspot_id in sent_hs_ids:
+                portal_matched.append(c)
+            elif c.reach_out_1 < cutoff:
+                legacy.append(c)
+            else:
+                untracked.append(c)
+
+        print(f'\nTotal with reach_out_1 set: {len(companies)}')
+        print(f'  Portal-matched (PitchApproval exists): {len(portal_matched)}')
+        print(f'  Pre-2026 / LEGACY-2025 (D11):          {len(legacy)}')
+        print(f'  Untracked 2026+ sends:                 {len(untracked)}')
+
+        if legacy:
+            print('\n--- LEGACY-2025 (planning dates, not real sends) ---')
+            for c in legacy:
+                print(f'  {c.reach_out_1}  {c.name}  [{c.hubspot_id}]')
+
+        if untracked:
+            print('\n--- UNTRACKED 2026 (real sends not in Portal) ---')
+            for c in untracked:
+                print(f'  {c.reach_out_1}  {c.name}  [{c.hubspot_id}]')
+
+        if not legacy and not untracked:
+            print('\nAll reach_out_1 dates match Portal PitchApproval records.')
+
     @app.cli.command('sync-knowledge')
     def sync_knowledge_command():
         """Pull Dropbox knowledge files into the local cache. Safe to re-run."""
