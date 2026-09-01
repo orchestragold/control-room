@@ -556,16 +556,25 @@ def create_app(config_class=Config):
 
     @app.cli.command('pitch-untracked-sends')
     def pitch_untracked_sends_command():
-        """D1 diagnostic: HubSpot companies with reach_out_1 set but no Portal PitchApproval.
+        """D11 triage: classify unmatched reach_out_1 dates into three tiers.
 
-        These are either legacy 2025 planning-calendar dates (pre-2026), Gmail-sent pitches
-        the Portal never saw, or Zoho sends the follow-up engine stamped but the Portal has
-        no record of. Used to distinguish real sends from planning noise before the engine
-        can safely key off reach_out_1.
+        Tier 1  future date               → definitively planned; no send is in the future.
+        Tier 2  past, day == 1            → 8-month formula fingerprint ("1st of the month
+                                            that is 8 months before the festival month").
+                                            Print the list; safe to migrate after review.
+        Tier 3  past, day != 1            → possible real send. STOP. Report individually.
+                                            This is the most valuable output: each record
+                                            is a candidate pitch with a missing follow-up.
+                                            Timber! and Northwest Tune-Up are here.
+
+        Migration (writing Tier 1+2 to reach_out_1_planned and clearing reach_out_1)
+        is blocked until: (a) Tier 3 is empty, and (b) the reach_out_1_planned property
+        exists in HubSpot (create after deleting about_us + linkedinbio, D12).
+        This command is read-only.
         """
-        from datetime import date as _date
         from app.models.hubspot_cache import HubSpotCompany
         from app.models.pitch import PitchApproval
+        from app.utils.dates import local_today
 
         companies = (
             HubSpotCompany.query
@@ -577,7 +586,8 @@ def create_app(config_class=Config):
             print('No HubSpot companies have reach_out_1 set.')
             return
 
-        # Build index of hubspot_ids that have a Portal PitchApproval (any status)
+        today = local_today()
+
         sent_hs_ids = {
             row.hubspot_contact_id
             for row in PitchApproval.query
@@ -586,36 +596,49 @@ def create_app(config_class=Config):
             .all()
         }
 
-        legacy  = []
-        untracked = []
         portal_matched = []
+        tier1 = []
+        tier2 = []
+        tier3 = []
 
-        cutoff = _date(2026, 1, 1)
         for c in companies:
             if c.hubspot_id in sent_hs_ids:
                 portal_matched.append(c)
-            elif c.reach_out_1 < cutoff:
-                legacy.append(c)
+            elif c.reach_out_1 > today:
+                tier1.append(c)
+            elif c.reach_out_1.day == 1:
+                tier2.append(c)
             else:
-                untracked.append(c)
+                tier3.append(c)
 
         print(f'\nTotal with reach_out_1 set: {len(companies)}')
-        print(f'  Portal-matched (PitchApproval exists): {len(portal_matched)}')
-        print(f'  Pre-2026 / LEGACY-2025 (D11):          {len(legacy)}')
-        print(f'  Untracked 2026+ sends:                 {len(untracked)}')
+        print(f'  Portal-matched (PitchApproval exists):          {len(portal_matched)}')
+        print(f'  Tier 1 — future date (definitively planned):    {len(tier1)}')
+        print(f'  Tier 2 — past, 1st of month (formula dates):    {len(tier2)}')
+        print(f'  Tier 3 — past, non-1st (possible real sends):   {len(tier3)}')
 
-        if legacy:
-            print('\n--- LEGACY-2025 (planning dates, not real sends) ---')
-            for c in legacy:
+        if tier3:
+            print()
+            print('─' * 62)
+            print('⚠  TIER 3 — POSSIBLE REAL SENDS (migration blocked)')
+            print('   Each record may be a pitch that went out with no follow-up.')
+            print('   Resolve these before migrating Tier 1 + Tier 2.')
+            print('─' * 62)
+            for c in tier3:
+                print(f'  {c.reach_out_1}  {c.name}  [{c.hubspot_id}]')
+            print(f'\n  {len(tier3)} record(s) blocking migration.')
+        else:
+            print('\n  No Tier 3 records — Tier 1+2 migration safe once reach_out_1_planned exists.')
+
+        if tier2:
+            print('\n--- Tier 2 — formula dates (past, 1st of month; scan before migrating) ---')
+            for c in tier2:
                 print(f'  {c.reach_out_1}  {c.name}  [{c.hubspot_id}]')
 
-        if untracked:
-            print('\n--- UNTRACKED 2026 (real sends not in Portal) ---')
-            for c in untracked:
+        if tier1:
+            print('\n--- Tier 1 — future dates (definitively planned) ---')
+            for c in tier1:
                 print(f'  {c.reach_out_1}  {c.name}  [{c.hubspot_id}]')
-
-        if not legacy and not untracked:
-            print('\nAll reach_out_1 dates match Portal PitchApproval records.')
 
     @app.cli.command('sync-knowledge')
     def sync_knowledge_command():
