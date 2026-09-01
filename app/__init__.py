@@ -648,6 +648,83 @@ def create_app(config_class=Config):
             for c in tier1:
                 print(f'  {c.reach_out_1}  {c.name}  [{c.hubspot_id}]')
 
+    @app.cli.command('hubspot-detect-duplicates')
+    def hubspot_detect_duplicates_command():
+        """D8: Find duplicate HubSpot Company records and output a keep/merge-in table.
+
+        Detects pairs by normalising names (strip [DUPLICATE] prefix, lowercase,
+        collapse punctuation). Scores each record on engagement signals to recommend
+        which to keep. Prints nothing but a report — nothing merges until Erich approves.
+        Merging in HubSpot is irreversible with the kept record winning on conflicts.
+        """
+        import re as _re
+        from app.models.hubspot_cache import HubSpotCompany
+
+        def _normalise(name: str) -> str:
+            # Strip [DUPLICATE...] or [DUPLICATE - DO NOT USE] prefix
+            name = _re.sub(r'^\[DUPLICATE[^\]]*\]\s*', '', name, flags=_re.IGNORECASE)
+            # Lowercase, replace non-alphanumeric with space, collapse whitespace
+            name = _re.sub(r'[^\w]', ' ', name.lower())
+            return _re.sub(r'\s+', ' ', name).strip()
+
+        def _score(c) -> int:
+            """Higher = more data = better candidate to keep."""
+            s = 0
+            if c.hs_lead_status == 'ATTEMPTED_TO_CONTACT': s += 4
+            elif c.hs_lead_status and c.hs_lead_status not in ('', 'NEW'): s += 2
+            if c.notes_last_contacted: s += 3
+            if c.reach_out_1:          s += 2
+            if c.description and len(c.description) > 100: s += 2
+            elif c.description:        s += 1
+            if c.website or c.domain:  s += 1
+            return s
+
+        all_companies = HubSpotCompany.query.order_by(HubSpotCompany.hubspot_id).all()
+
+        # Group by normalised name — handles [DUPLICATE] prefixed entries
+        from collections import defaultdict
+        groups: dict = defaultdict(list)
+        for c in all_companies:
+            key = _normalise(c.name)
+            if key:
+                groups[key].append(c)
+
+        pairs = {k: v for k, v in groups.items() if len(v) > 1}
+
+        if not pairs:
+            print('\nNo duplicate Company records detected.')
+            return
+
+        print(f'\n{len(pairs)} duplicate group(s) found ({sum(len(v) for v in pairs.values())} records total)\n')
+        print('Merging in HubSpot is irreversible — the kept record wins on all field conflicts.')
+        print('Approve each row before doing anything.\n')
+
+        total_merge_in = 0
+        for key in sorted(pairs):
+            group = sorted(pairs[key], key=_score, reverse=True)
+            keep    = group[0]
+            merge_ins = group[1:]
+            total_merge_in += len(merge_ins)
+
+            print(f'── {key} ({len(group)} records) ──')
+
+            def _row(c, role):
+                status  = (c.hs_lead_status or '—')[:20]
+                ro1     = str(c.reach_out_1) if c.reach_out_1 else '—'
+                nolc    = '✓ contacted' if c.notes_last_contacted else '—'
+                score   = _score(c)
+                name    = c.name[:50]
+                print(f'  {role:9s}  {c.hubspot_id:15s}  score={score:2d}  {status:20s}  ro1={ro1:12s}  {nolc}  "{name}"')
+
+            _row(keep, 'KEEP')
+            for m in merge_ins:
+                _row(m, 'MERGE-IN')
+            print()
+
+        print(f'Total to merge in: {total_merge_in} record(s)')
+        print('To merge: HubSpot UI → Company record → Actions → Merge')
+        print('The KEEP record absorbs the MERGE-IN record; any field the KEEP lacks is filled from MERGE-IN.')
+
     @app.cli.command('sync-knowledge')
     def sync_knowledge_command():
         """Pull Dropbox knowledge files into the local cache. Safe to re-run."""
