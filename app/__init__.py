@@ -588,13 +588,17 @@ def create_app(config_class=Config):
 
         today = local_today()
 
-        sent_hs_ids = {
+        # Source 1: Portal PitchApproval records
+        portal_hs_ids = {
             row.hubspot_contact_id
             for row in PitchApproval.query
             .filter(PitchApproval.hubspot_contact_id != '')
             .filter(PitchApproval.hubspot_contact_id != None)
             .all()
         }
+        # Source 2: HubSpot hs_lead_status = ATTEMPTED_TO_CONTACT or CONNECTED
+        # means the engine or a manual update confirmed the send — treat as matched.
+        hs_confirmed_statuses = {'ATTEMPTED_TO_CONTACT', 'CONNECTED'}
 
         portal_matched = []
         tier1 = []
@@ -602,7 +606,11 @@ def create_app(config_class=Config):
         tier3 = []
 
         for c in companies:
-            if c.hubspot_id in sent_hs_ids:
+            is_matched = (
+                c.hubspot_id in portal_hs_ids
+                or c.hs_lead_status in hs_confirmed_statuses
+            )
+            if is_matched:
                 portal_matched.append(c)
             elif c.reach_out_1 > today:
                 tier1.append(c)
@@ -612,7 +620,7 @@ def create_app(config_class=Config):
                 tier3.append(c)
 
         print(f'\nTotal with reach_out_1 set: {len(companies)}')
-        print(f'  Portal-matched (PitchApproval exists):          {len(portal_matched)}')
+        print(f'  Confirmed sent (PitchApproval or ATTEMPTED_TO_CONTACT): {len(portal_matched)}')
         print(f'  Tier 1 — future date (definitively planned):    {len(tier1)}')
         print(f'  Tier 2 — past, 1st of month (formula dates):    {len(tier2)}')
         print(f'  Tier 3 — past, non-1st (possible real sends):   {len(tier3)}')
