@@ -2,7 +2,7 @@
 """
 Portal smoke test — runs against the live production site.
 
-Tests the full HTTP stack end-to-end: session auth → CSRF → approve POST.
+Tests the full HTTP stack end-to-end: session auth → CSRF → Referer → routing.
 This is the test that would have caught the "405 while 11 tests pass" CSRF failure.
 
 Usage:
@@ -11,11 +11,9 @@ Usage:
     3. Paste it into scripts/.smoke_session (one line, the raw cookie value).
     4. Run: python3 scripts/smoke_test.py
 
-⚠  This approves the first pending draft and queues a real email send.
-   Only run when you have a draft you're ready to send.
-
-   If there are no pending drafts, the test exits OK after verifying
-   auth + CSRF without making any writes.
+Safe to run any number of times — makes no writes, sends no email.
+The approve step POSTs to a deliberately invalid pid and asserts 404,
+proving routing, auth, CSRF, and the Referer header all work end-to-end.
 
 Cookie file: scripts/.smoke_session (gitignored — never commit it).
 """
@@ -117,12 +115,14 @@ def post(path: str, cookie: str, data: dict) -> tuple[int, str]:
         headers={
             'Cookie': f'session={cookie}',
             'Content-Type': 'application/x-www-form-urlencoded',
+            # Flask-WTF requires Referer on HTTPS when WTF_CSRF_SSL_STRICT=True (default).
+            # Without it the request gets a 400 "referrer header is missing" before
+            # the route even runs — same failure shape as the original CSRF 403.
+            'Referer': BASE_URL + path,
         },
         method='POST',
     )
-    # Don't follow redirects — a 302 means success, a 403/405/500 is the failure.
-    opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler())
-
+    # Don't follow redirects — a 302 means success, a 4xx is the failure.
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
@@ -139,30 +139,6 @@ def extract_meta(html: str, name: str) -> str:
     m = re.search(rf'<meta\s+name="{re.escape(name)}"\s+content="([^"]*)"', html)
     return m.group(1) if m else ''
 
-
-def extract_first_approve_pid(html: str) -> str:
-    m = re.search(r'action="[^"]*/approve/(\d+)"', html)
-    return m.group(1) if m else ''
-
-
-def extract_form_field(html: str, field_name: str, pid: str) -> str:
-    """Extract an input value from the approve form."""
-    # Handles: value="..." on input[name="field_name"]
-    pattern = rf'name="{re.escape(field_name)}"\s[^>]*value="([^"]*)"'
-    m = re.search(pattern, html)
-    if m:
-        return m.group(1)
-    # Also try: value="..." name="field_name"
-    pattern2 = rf'value="([^"]*)"\s[^>]*name="{re.escape(field_name)}"'
-    m2 = re.search(pattern2, html)
-    return m2.group(1) if m2 else ''
-
-
-def extract_body(html: str, pid: str) -> str:
-    """Extract draft body from the server-rendered contenteditable div."""
-    pattern = rf'data-for="body-{re.escape(pid)}">(.*?)</div>'
-    m = re.search(pattern, html, re.DOTALL)
-    return m.group(1).strip() if m else ''
 
 
 def check_routes(cookie: str, csrf: str) -> None:
@@ -223,49 +199,39 @@ def main() -> None:
     # Step 2b: route checks — GET pages + POST sync (now that we have a CSRF token)
     check_routes(cookie, csrf)
 
-    # Step 3: find a pending draft
-    pid = extract_first_approve_pid(html)
-    if not pid:
-        warn('No pending drafts found on the review page.')
-        print('\nAuth and CSRF handshake verified. Nothing to approve.\n')
-        sys.exit(0)
-    ok(f'Found pending draft pid={pid}')
-
-    # Step 4: pull form field values from the review page
-    to_email  = extract_form_field(html, 'to_email', pid)
-    cc_email  = extract_form_field(html, 'cc_email', pid)
-    subject   = extract_form_field(html, 'subject', pid)
-    send_date = extract_form_field(html, 'send_date', pid)
-    body      = extract_body(html, pid)
-
-    if not to_email:
-        fail(f'Draft pid={pid} has no to_email — cannot approve. Fix the draft first.')
-    if not body:
-        warn(f'Could not extract body for pid={pid} — using placeholder.')
-        body = '(smoke test — body extraction failed)'
-
-    print(f'  To: {to_email}')
-    print(f'  Subject: {subject[:60]}')
-
-    # Step 5: POST the approval
-    print(f'\nStep 2: POST approve pid={pid}...')
-    approve_path = f'/projects/orchestra-gold/pitch-machine/approve/{pid}'
+    # Step 3: POST to a deliberately invalid pid.
+    # A 404 proves routing, auth, CSRF token, AND the Referer header all worked —
+    # the request got through every gate, just found no record to act on.
+    # A 403 or 400 means CSRF/Referer is still broken.
+    # A 405 means the route method wiring is wrong.
+    # This is safe to run any number of times — no draft is approved, no mail is sent.
+    INVALID_PID = 99999999
+    approve_path = f'/projects/orchestra-gold/pitch-machine/approve/{INVALID_PID}'
+    print(f'\nStep 2: POST approve pid={INVALID_PID} (invalid — expects 404)...')
     post_status, post_body = post(approve_path, cookie, {
         'csrf_token': csrf,
-        'to_email':   to_email,
-        'cc_email':   cc_email,
-        'subject':    subject,
-        'body':       body,
-        'send_date':  send_date,
+        'to_email':   'smoke@test.invalid',
+        'cc_email':   '',
+        'subject':    'Smoke test — should never send',
+        'body':       '<p>Smoke test body</p>',
+        'send_date':  '',
     })
 
-    if post_status in (301, 302, 303):
-        ok(f'Approve returned HTTP {post_status} (redirect) — success.')
-    elif post_status == 200 and 'error' not in post_body.lower()[:300]:
-        ok(f'Approve returned HTTP {post_status} — check for flash errors in the browser.')
+    if post_status == 404:
+        ok(f'Approve returned HTTP 404 — routing, auth, CSRF and Referer all verified.')
+    elif post_status in (400, 403):
+        fail(
+            f'Approve returned HTTP {post_status} — CSRF or Referer check failed.\n'
+            f'  Body preview: {post_body[:300]!r}'
+        )
+    elif post_status == 405:
+        fail(
+            f'Approve returned HTTP 405 — route method wiring is broken.\n'
+            f'  Body preview: {post_body[:200]!r}'
+        )
     else:
         fail(
-            f'Approve returned HTTP {post_status}.\n'
+            f'Approve returned unexpected HTTP {post_status} (expected 404).\n'
             f'  Body preview: {post_body[:300]!r}'
         )
 

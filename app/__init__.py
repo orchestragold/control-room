@@ -524,6 +524,15 @@ def create_app(config_class=Config):
                 print(f'  Failed: {name}: {e}')
                 continue
 
+            # Mirror the browser route's logic exactly:
+            # hs: items have no email column — extract from research notes.
+            # qs: items use payload['email_address'] with NO fallback; an empty
+            # TO is visible and fixable, a silently wrong one isn't.
+            if entry_type == 'hubspot':
+                to_email = _first_email(draft.research_notes)
+            else:
+                to_email = email_address
+
             db.session.add(PitchApproval(
                 hubspot_contact_id = hubspot_id,
                 company_name       = name,
@@ -532,7 +541,7 @@ def create_app(config_class=Config):
                 draft_subject      = draft.subject,
                 draft_body         = sanitize_body_html(draft.body),
                 research_notes     = draft.research_notes,
-                to_email           = email_address or _first_email(draft.research_notes),
+                to_email           = to_email,
                 cc_email           = _CC,
                 send_date          = send_date,
                 status             = 'pending',

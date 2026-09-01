@@ -1,8 +1,13 @@
 """
-Tests for the generate() route — covers the O1 dedup fix.
+Tests for the generate() route and generate-drafts CLI.
 
 O1 (fixed in session 2): generate() now checks status IN ('pending','approved','sent'),
 blocking a second draft for any company that already has an active approval.
+
+D3 (fixed 2026-09-01): generate-drafts CLI was using _first_email(research_notes) as
+a fallback for qs: items even when payload['email_address'] was present. The fix aligns
+the CLI with the browser route: qs: items use email_address with no fallback, so an
+empty TO is visible rather than silently wrong.
 """
 import pytest
 from unittest.mock import patch, MagicMock
@@ -144,4 +149,97 @@ class TestO1GenerateDedup:
             assert count == 1, (
                 f"O1 gap confirmed: {count} approvals exist for a 'sent' company. "
                 "The portal can re-pitch someone who's already been contacted."
+            )
+
+
+class TestD3GenerateDraftsCLIEmail:
+    """
+    D3: generate-drafts CLI must use payload['email_address'] for qs: items,
+    not fall back to _first_email(research_notes).
+
+    Two paths that must agree: browser route (run_generate_next) and CLI
+    (generate-drafts). The browser route has no fallback; the CLI previously
+    did, and would silently pick the wrong address when notes contained emails.
+    """
+
+    def _seed_task(self, db, entry_type, email_address, research_notes_email):
+        """
+        Create a pending generate_draft task. research_notes_email is a DIFFERENT
+        address embedded in the research notes — the test asserts it is NOT used.
+        """
+        from app.models.queue import APITaskQueue
+        payload = {
+            'entry_type': entry_type,
+            'pitch_type': 'Festival',
+            'send_date':  None,
+        }
+        if entry_type == 'hubspot':
+            payload.update({'name': 'Acme Fest', 'hubspot_id': 'hs-d3', 'website': '', 'description': ''})
+        else:
+            payload.update({'item_name': 'Acme Fest', 'hubspot_id': '', 'notes': '',
+                            'email_address': email_address})
+        task = APITaskQueue(
+            platform='pitch_machine', task_type='generate_draft',
+            status='pending', payload=payload,
+        )
+        db.session.add(task)
+        db.session.commit()
+        return research_notes_email
+
+    def _make_draft(self, to_in_notes):
+        draft = MagicMock()
+        draft.subject = 'Test subject'
+        draft.body    = '<p>body</p>'
+        # Research notes contain a DIFFERENT address — should not be picked for qs: items.
+        draft.research_notes = f'Contact them at {to_in_notes} for bookings.'
+        return draft
+
+    def test_qs_uses_payload_email_not_notes(self, app, db, runner):
+        """D3: qs: item → to_email comes from payload, ignoring research_notes."""
+        from app.models.pitch import PitchApproval
+
+        PAYLOAD_EMAIL = 'correct@venue.com'
+        NOTES_EMAIL   = 'wrong@notes.com'
+
+        with app.app_context():
+            self._seed_task(db, 'queue_sheet', PAYLOAD_EMAIL, NOTES_EMAIL)
+
+        draft = self._make_draft(NOTES_EMAIL)
+        with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
+            MockGen.return_value.generate.return_value = draft
+            with patch('app.integrations.dropbox_sync.get_or_create_queue_csv', return_value=''):
+                with patch('app.integrations.dropbox_sync.sync_knowledge_to_cache'):
+                    runner.invoke(args=['generate-drafts'])
+
+        with app.app_context():
+            approval = PitchApproval.query.first()
+            assert approval is not None, 'No PitchApproval created by CLI'
+            assert approval.to_email == PAYLOAD_EMAIL, (
+                f'D3 regression: CLI used {approval.to_email!r} instead of '
+                f'payload email_address {PAYLOAD_EMAIL!r}. '
+                'The CLI fell back to _first_email(research_notes) for a qs: item.'
+            )
+
+    def test_qs_empty_email_stays_empty(self, app, db, runner):
+        """D3: qs: item with no email_address → to_email is empty, not extracted from notes."""
+        from app.models.pitch import PitchApproval
+
+        NOTES_EMAIL = 'shouldnotuse@notes.com'
+
+        with app.app_context():
+            self._seed_task(db, 'queue_sheet', '', NOTES_EMAIL)
+
+        draft = self._make_draft(NOTES_EMAIL)
+        with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
+            MockGen.return_value.generate.return_value = draft
+            with patch('app.integrations.dropbox_sync.get_or_create_queue_csv', return_value=''):
+                with patch('app.integrations.dropbox_sync.sync_knowledge_to_cache'):
+                    runner.invoke(args=['generate-drafts'])
+
+        with app.app_context():
+            approval = PitchApproval.query.first()
+            assert approval is not None, 'No PitchApproval created by CLI'
+            assert approval.to_email == '', (
+                f'D3: empty email_address should stay empty, got {approval.to_email!r}. '
+                'An empty TO is visible; a silently wrong one is not.'
             )
