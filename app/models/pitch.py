@@ -4,8 +4,9 @@ from app.extensions import db
 
 class PitchApproval(db.Model):
     """
-    Touch 1 pitch drafts awaiting Erich's explicit review and approval.
-    Touch 2/3 auto-sends go through api_task_queue, not here.
+    All three touches per target exist as PitchApproval rows (touch_number 1/2/3).
+    Touch 1 is approved interactively; approving Touch 1 auto-schedules Touch 2/3.
+    process-queue fires each touch when its scheduled_at arrives.
 
     hubspot_contact_id stores the HubSpot *company* ID — festivals are COMPANY
     objects in HubSpot. The column name is a pre-existing artifact; don't rename.
@@ -23,15 +24,16 @@ class PitchApproval(db.Model):
     to_email           = db.Column(db.String(500))  # blank at generation; Erich fills in
     cc_email           = db.Column(db.String(500))  # pre-filled to booking@orchestragold.com
     status             = db.Column(
-        db.Enum('pending', 'approved', 'rejected', 'sent'),
+        db.Enum('pending', 'approved', 'rejected', 'sent', 'cancelled_reply'),
         nullable=False,
         default='pending',
     )
-    send_date     = db.Column(db.Date, nullable=True)   # computed at queue time; written to HubSpot on approve
-    approved_by   = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
-    approved_at   = db.Column(db.DateTime)
-    sent_at       = db.Column(db.DateTime)
-    error_message = db.Column(db.Text)
+    send_date        = db.Column(db.Date, nullable=True)
+    sent_message_id  = db.Column(db.String(500), nullable=True)  # RFC Message-ID from Zoho after Touch 1 sends; used to thread Touch 2/3 in-reply-to
+    approved_by      = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    approved_at      = db.Column(db.DateTime)
+    sent_at          = db.Column(db.DateTime)
+    error_message    = db.Column(db.Text)
     created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at    = db.Column(
         db.DateTime,

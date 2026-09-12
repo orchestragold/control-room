@@ -710,9 +710,8 @@ class TestHubSpotOnlyPitchTypeDefault:
     Untouched HubSpot-only companies (needs-outreach) stay pitch_type=None — they
     are the raw 'everything in HubSpot' population and don't belong on the Wheel.
 
-    Actively-worked companies (queued = has reach_out_1, sent, in-negotiation, etc.)
-    get pitch_type='Festival' even if they never appeared in the spreadsheet, because
-    Erich chose to pitch them and they must remain visible on the Wheel.
+    Actively-worked companies get 'Festival - Cold' (queued, not yet sent) or
+    'Festival - Pitched Before' (already sent) so the Wheel shows the right type.
     """
 
     def test_untouched_hubspot_only_company_has_no_pitch_type(self, app, db):
@@ -744,8 +743,8 @@ class TestHubSpotOnlyPitchTypeDefault:
                 "no reach_out_1) should stay None so it doesn't appear on the Wheel."
             )
 
-    def test_queued_hubspot_only_company_gets_festival(self, app, db):
-        """queued (has reach_out_1): actively worked → pitch_type='Festival'."""
+    def test_queued_hubspot_only_company_gets_festival_cold(self, app, db):
+        """queued (has reach_out_1, NEW status): not yet sent → pitch_type='Festival - Cold'."""
         from datetime import date
         from app.models.pitch_target import PitchTarget
 
@@ -763,13 +762,13 @@ class TestHubSpotOnlyPitchTypeDefault:
 
             t = PitchTarget.query.filter_by(name='Queued HubSpot Festival').first()
             assert t is not None
-            assert t.pitch_type == 'Festival', (
-                f"pitch_type={t.pitch_type!r}; an actively-queued company (reach_out_1 set) "
-                "must appear on the Wheel as Festival."
+            assert t.pitch_type == 'Festival - Cold', (
+                f"pitch_type={t.pitch_type!r}; a queued company (reach_out_1 set, not yet sent) "
+                "should be 'Festival - Cold' so the Wheel shows the right type."
             )
 
-    def test_sent_hubspot_only_company_gets_festival(self, app, db):
-        """sent (ATTEMPTED_TO_CONTACT): pitched via Portal → must stay visible."""
+    def test_sent_hubspot_only_company_gets_festival_pitched_before(self, app, db):
+        """sent (ATTEMPTED_TO_CONTACT): Touch 1 was sent → pitch_type='Festival - Pitched Before'."""
         from app.models.pitch_target import PitchTarget
 
         with app.app_context():
@@ -785,7 +784,7 @@ class TestHubSpotOnlyPitchTypeDefault:
 
             t = PitchTarget.query.filter_by(name='Sent HubSpot Festival').first()
             assert t is not None
-            assert t.pitch_type == 'Festival', (
-                f"pitch_type={t.pitch_type!r}; a sent company must remain on the "
-                "Wheel — removing it would hide a pitch that already went out."
+            assert t.pitch_type == 'Festival - Pitched Before', (
+                f"pitch_type={t.pitch_type!r}; a sent company (ATTEMPTED_TO_CONTACT) must be "
+                "'Festival - Pitched Before' so the next cycle uses the right pitch type."
             )

@@ -240,15 +240,18 @@ def _apply_hubspot(record: dict, company: HubSpotCompany) -> None:
     record['website']          = record['website']     or company.website
     record['description']      = record['description'] or company.description
     record['reach_out_1']      = record['reach_out_1'] or company.reach_out_1
-    # Assign Festival to HubSpot-only companies that have been actively worked:
-    # those with a reach_out_1 date OR a non-default stage (sent, in-negotiation,
-    # etc.). Plain needs-outreach companies with no date and no other curation
-    # stay pitch_type=None — they're the raw 'everything in HubSpot' population
-    # and don't belong on the Wheel until explicitly added to a curated source.
+    # Assign pitch_type for HubSpot-only companies that have been actively worked.
+    # Plain needs-outreach companies with no date and no curation stay pitch_type=None.
+    # Pitched Before = Touch 1 was actually sent (ATTEMPTED_TO_CONTACT or higher).
+    # Cold = in the pipeline but not yet sent.
     if not record['pitch_type']:
         derived = derive_hs_stage(company.hs_lead_status, company.reach_out_1)
         if derived != 'needs-outreach':
-            record['pitch_type'] = 'Festival'
+            if company.hs_lead_status in ('ATTEMPTED_TO_CONTACT', 'CONNECTED',
+                                           'OPEN_DEAL', 'OPEN', 'IN_PROGRESS'):
+                record['pitch_type'] = 'Festival - Pitched Before'
+            else:
+                record['pitch_type'] = 'Festival - Cold'
 
 
 def _apply_spreadsheet(record: dict, row: dict) -> None:
@@ -256,9 +259,19 @@ def _apply_spreadsheet(record: dict, row: dict) -> None:
     record['spreadsheet_status'] = row.get('status')
     record['spreadsheet_row']    = row.get('row')
     record['website']            = record['website']    or row.get('website')
-    # The Festival Outreach XLSX often has no Pitch Type column (all rows are Festival
-    # by definition). Default here so HubSpot-only companies stay pitch_type=None.
-    record['pitch_type']         = record['pitch_type'] or row.get('pitch_type') or 'Festival'
+    # Spreadsheet rows are all Festival by definition (no Pitch Type column in the XLSX).
+    # Spreadsheet Status "Pitch Sent" → Pitched Before; everything else → Cold.
+    # Only overrides pitch_type if not already set by a richer source (HubSpot or CSV).
+    if not record['pitch_type']:
+        explicit = row.get('pitch_type')
+        if explicit and explicit not in ('Festival',):
+            record['pitch_type'] = explicit  # non-Festival type specified explicitly
+        else:
+            ss_status = (row.get('status') or '').strip()
+            if ss_status.startswith('Pitch Sent'):
+                record['pitch_type'] = 'Festival - Pitched Before'
+            else:
+                record['pitch_type'] = 'Festival - Cold'
     raw_dl = row.get('submission_deadline')
     if raw_dl and not record['submission_deadline']:
         record['submission_deadline'] = _parse_date_value(raw_dl)
@@ -268,7 +281,19 @@ def _apply_csv_item(record: dict, item) -> None:
     record['source_queue_csv'] = True
     record['queue_csv_status'] = item.status
     record['email_address']    = record['email_address'] or item.email_address or ''
-    record['pitch_type']       = record['pitch_type']    or item.pitch_type
+    # For Festival-typed CSV rows, classify by status:
+    #   pitched / replied → Festival - Pitched Before (Touch 1 was sent; they know us)
+    #   queued / anything else → Festival - Cold
+    # For non-Festival types, use the type verbatim.
+    if not record['pitch_type']:
+        csv_type = item.pitch_type or ''
+        if csv_type in ('Festival', ''):
+            if item.status in ('pitched', 'replied'):
+                record['pitch_type'] = 'Festival - Pitched Before'
+            else:
+                record['pitch_type'] = 'Festival - Cold'
+        else:
+            record['pitch_type'] = csv_type
     if item.status == 'not_a_fit':
         record['not_a_fit'] = True
         if item.not_a_fit_reason:

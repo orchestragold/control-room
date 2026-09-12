@@ -741,6 +741,12 @@ def approve(pid: int):
         created_by = current_user.id,
     ))
 
+    # ── Schedule Touch 2/3 (if they exist and the pitch type has intervals) ────────
+    # Touch 2/3 rows are created at generate-drafts time. Approving Touch 1 sets
+    # the anchor date and schedules them. send_date for each is computed from
+    # local_today() (not approved_at, which can drift to UTC after 5pm Pacific).
+    _schedule_followup_touches(approval, current_user.id)
+
     # ── C3: commit approval + task row BEFORE external side effects ───────────────
     # External writes (Dropbox, HubSpot) happen after the local state is durable.
     # If they fail, the task row already exists and process-queue will still send.
@@ -1403,6 +1409,91 @@ def _mirror_not_a_fit_to_hubspot(hubspot_id: str, company_name: str, reason: str
             client.create_company_note(hubspot_id, f'Not a fit — {company_name}: {reason}')
     except Exception as e:
         print(f'[hubspot] not_a_fit mirror failed for {company_name!r}: {e}', file=sys.stderr)
+
+
+def _schedule_followup_touches(touch1_approval: 'PitchApproval', user_id: int) -> None:
+    """
+    After Touch 1 is approved, find pending Touch 2/3 rows for the same company/contact
+    and schedule them using the pitch type's configured intervals.
+
+    Intervals are anchored to local_today() (the day Touch 1 was approved), not to
+    approved_at (which is UTC and can be the wrong calendar day after 5pm Pacific).
+
+    Called BEFORE the C3 commit so Touch 2/3 task rows are part of the same transaction.
+    """
+    from app.models.pitch_config import PitchTypeConfig
+    from app.utils.dates import local_today as _local_today
+    from zoneinfo import ZoneInfo as _ZoneInfo
+
+    pt_config = PitchTypeConfig.query.filter_by(
+        name=touch1_approval.pitch_type
+    ).first()
+
+    if not pt_config or pt_config.touch1_to_touch2_days is None:
+        return  # Sequence not configured for this pitch type
+
+    anchor = _local_today()
+    _pacific = _ZoneInfo('America/Los_Angeles')
+
+    intervals = [
+        (2, pt_config.touch1_to_touch2_days, 'send_pitch_touch2'),
+        (3, (pt_config.touch1_to_touch2_days or 0) + (pt_config.touch2_to_touch3_days or 0), 'send_pitch_touch3'),
+    ]
+
+    # Find matching Touch 2 and 3 rows for this company/contact.
+    followups = (
+        PitchApproval.query
+        .filter(
+            PitchApproval.hubspot_contact_id == touch1_approval.hubspot_contact_id,
+            PitchApproval.company_name == touch1_approval.company_name,
+            PitchApproval.pitch_type == touch1_approval.pitch_type,
+            PitchApproval.touch_number > 1,
+            PitchApproval.status == 'pending',
+        )
+        .all()
+    )
+
+    if not followups:
+        return
+
+    followup_by_touch = {f.touch_number: f for f in followups}
+
+    for touch_num, days_offset, task_type in intervals:
+        if days_offset is None:
+            continue
+        followup = followup_by_touch.get(touch_num)
+        if not followup:
+            continue
+
+        send_date = anchor + __import__('datetime').timedelta(days=days_offset)
+        _local_send = __import__('datetime').datetime(
+            send_date.year, send_date.month, send_date.day, 9, 0, 0,
+            tzinfo=_pacific,
+        )
+        scheduled_at = _local_send.astimezone(_ZoneInfo('UTC')).replace(tzinfo=None)
+
+        followup.send_date   = send_date
+        followup.status      = 'approved'
+        followup.approved_by = user_id
+        followup.approved_at = __import__('datetime').datetime.utcnow()
+
+        db.session.add(APITaskQueue(
+            platform     = 'zoho_mail',
+            task_type    = task_type,
+            scheduled_at = scheduled_at,
+            payload      = {
+                'pitch_approval_id':  followup.id,
+                'touch1_approval_id': touch1_approval.id,
+                'to_email_intended':  followup.to_email or touch1_approval.to_email,
+                'to_email_actual':    followup.to_email or touch1_approval.to_email,
+                'cc_email':           followup.cc_email or touch1_approval.cc_email,
+                'subject':            followup.draft_subject or '',
+                'body':               followup.draft_body or '',
+                'was_redirected':     False,
+                'send_date':          send_date.isoformat(),
+            },
+            created_by = user_id,
+        ))
 
 
 def _write_hubspot_reach_out_1(hubspot_id: str, send_date: Optional[date]) -> Optional[str]:

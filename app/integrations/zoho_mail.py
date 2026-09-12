@@ -88,10 +88,18 @@ def send_email(
     body_html: str,
     cc_address: Optional[str] = None,
     from_address: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ) -> dict:
     """
     Send an HTML email via Zoho Mail.
     Returns the Zoho API response dict.
+
+    in_reply_to: RFC Message-ID of the original Touch 1 message (threads Touch 2/3
+                 inside the original conversation). Format: '<id@domain>'.
+    references:  Full References header value (space-separated Message-IDs). Typically
+                 the same as in_reply_to for a two-level thread.
+
     In test mode, the to_address should already be the redirected address
     (resolve_email_recipient() handles that in the approve route).
     """
@@ -112,6 +120,10 @@ def send_email(
     }
     if cc_address:
         payload['ccAddress'] = cc_address
+    if in_reply_to:
+        payload['inReplyTo'] = in_reply_to
+    if references:
+        payload['references'] = references
 
     resp = requests.post(
         _SEND_URL.format(account_id=account_id),
@@ -124,6 +136,36 @@ def send_email(
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def get_message_rfc_id(zoho_message_id: str) -> Optional[str]:
+    """
+    Fetch the RFC Message-ID header for a sent message by its Zoho internal ID.
+    Returns the header value (e.g. '<abc123@mail.zoho.com>') or None on failure.
+    Used to populate PitchApproval.sent_message_id after Touch 1 sends.
+    """
+    try:
+        access_token = _get_access_token()
+        account_id   = get_account_id(access_token)
+        resp = requests.get(
+            f'https://mail.zoho.com/api/accounts/{account_id}/messages/{zoho_message_id}',
+            headers={'Authorization': f'Zoho-oauthtoken {access_token}'},
+            params={'content': 'true'},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get('data', {})
+        # Zoho returns headers as a list of {name, value} dicts or as a flat dict
+        headers = data.get('headers', [])
+        if isinstance(headers, list):
+            for h in headers:
+                if h.get('name', '').lower() == 'message-id':
+                    return h.get('value')
+        elif isinstance(headers, dict):
+            return headers.get('Message-ID') or headers.get('message-id')
+    except Exception:
+        pass
+    return None
 
 
 def list_sent_messages(days_back: int = 90) -> list[dict]:

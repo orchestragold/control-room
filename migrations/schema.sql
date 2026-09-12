@@ -303,6 +303,31 @@ CREATE TABLE IF NOT EXISTS pitch_targets (
 -- ALTER TABLE pitch_type_configs
 --   ADD COLUMN IF NOT EXISTS is_cyclical BOOLEAN NOT NULL DEFAULT TRUE AFTER active;
 
+-- ─── Multi-touch slice (2026-09-11) — new columns ──────────────────────────────
+-- Run these on production before deploying the multi-touch slice code.
+-- Fresh installs get these automatically via db.create_all().
+--
+-- 1. Sequence config on pitch_type_configs:
+-- ALTER TABLE pitch_type_configs
+--   ADD COLUMN IF NOT EXISTS touch1_to_touch2_days INT NULL AFTER sort_order,
+--   ADD COLUMN IF NOT EXISTS touch2_to_touch3_days INT NULL AFTER touch1_to_touch2_days,
+--   ADD COLUMN IF NOT EXISTS touch2_prompt MEDIUMTEXT NULL AFTER touch2_to_touch3_days,
+--   ADD COLUMN IF NOT EXISTS touch3_prompt MEDIUMTEXT NULL AFTER touch2_prompt;
+--
+-- 2. RFC Message-ID storage on pitch_approvals (for threading Touch 2/3):
+-- ALTER TABLE pitch_approvals
+--   ADD COLUMN IF NOT EXISTS sent_message_id VARCHAR(500) NULL AFTER error_message;
+--
+-- 3. New status value on pitch_approvals:
+-- ALTER TABLE pitch_approvals
+--   MODIFY COLUMN status ENUM('pending','approved','rejected','sent','cancelled_reply')
+--   NOT NULL DEFAULT 'pending';
+--
+-- 4. Seed the two new Festival pitch types:
+-- (Run `flask seed-pitch-types` after deploying — it skips existing rows.)
+--
+-- 5. After confirming Touch 2/3 have successfully sent, retire pitch-followup-engine.
+
 -- ─── Phase 2 pre-work: fix pitch_type defaults and cyclical flags ─────────────
 -- 1. 'PNW Tour - Media' and 'Distribution' are one-off types — set is_cyclical=0
 --    so they render the linear timeline instead of the Wheel.
