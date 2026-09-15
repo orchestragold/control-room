@@ -6,13 +6,15 @@ Covers:
   T2  — process_queue passes inReplyTo/references for Touch 2/3 sends
   T3  — _schedule_followup_touches computes correct send_date and scheduled_at
   T4  — _schedule_followup_touches does nothing when pitch type has no intervals
-  T5  — generate_drafts creates 3 PitchApproval rows when pitch type is configured
+  T5  — run_generate_next (browser) creates 3 PitchApproval rows when pitch type is configured
+  T5b — generate_drafts (CLI) creates 3 PitchApproval rows when pitch type is configured
   T6  — generate_drafts creates only 1 row when pitch type has no intervals
   T7  — cancel_replied_touches cancels pending Touch 2/3 on real reply
   T8  — cancel_replied_touches leaves Touch 2/3 pending on OOO subject
   T9  — cancel_replied_touches does not cancel Touch 1 (only followups)
   T10 — Festival - Cold CSV migration: pitched → Pitched Before; queued → Cold
   T11 — send_date / scheduled_at agreement (one test enforces their agreement)
+  T12 — config_edit round-trips touch1_to_touch2_days through the form
 """
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -473,4 +475,244 @@ class TestT10CSVPitchTypeMigration:
             assert t is not None
             assert t.pitch_type == 'Festival - Pitched Before', (
                 f"pitch_type={t.pitch_type!r}; CSV status='replied' → 'Festival - Pitched Before'."
+            )
+
+
+# ── T5: run_generate_next creates 3 rows ──────────────────────────────────────
+
+def _seed_pitch_type_with_sequence(db, app, name='Festival - Cold'):
+    from app.models.pitch_config import PitchTypeConfig
+    with app.app_context():
+        if PitchTypeConfig.query.filter_by(name=name).first() is None:
+            db.session.add(PitchTypeConfig(
+                name=name,
+                archive_dropbox_path='/test.docx',
+                prompt_template='Draft {name} {website} {description}',
+                badge_color='#5aaa7a',
+                active=True,
+                touch1_to_touch2_days=30,
+                touch2_to_touch3_days=30,
+                touch2_prompt='Write a brief Touch 2 follow-up for the target.',
+                touch3_prompt='Write a graceful close-out for the target.',
+            ))
+            db.session.commit()
+
+
+def _seed_generate_task(db, app, pitch_type='Festival - Cold', hubspot_id='hs-t5'):
+    from app.models.queue import APITaskQueue
+    with app.app_context():
+        task = APITaskQueue(
+            platform='pitch_machine',
+            task_type='generate_draft',
+            status='pending',
+            payload={
+                'entry_type': 'hubspot',
+                'hubspot_id': hubspot_id,
+                'pitch_type': pitch_type,
+                'name': 'T5 Festival',
+                'website': 'https://t5fest.com',
+                'description': 'A test festival for T5',
+                'send_date': None,
+            },
+        )
+        db.session.add(task)
+        db.session.commit()
+
+
+def _mock_draft():
+    from unittest.mock import MagicMock
+    d = MagicMock()
+    d.subject = 'Orchestra GOLD ✱ T5 Festival 2027'
+    d.body    = '<p>Touch 1 body.</p>'
+    d.research_notes = 'Contact: buyer@t5fest.com'
+    return d
+
+
+class TestT5BrowserPathCreatesThreeRows:
+    """T5: run_generate_next must create 3 PitchApproval rows when the pitch type
+    has touch1_to_touch2_days and touch2_to_touch3_days configured."""
+
+    def test_three_rows_created_via_browser_path(self, app, db, client):
+        from app.models.pitch import PitchApproval
+        from unittest.mock import patch, MagicMock
+
+        _seed_pitch_type_with_sequence(db, app)
+        _seed_generate_task(db, app)
+
+        mock_followup = ('<p>Follow-up body.</p>', 'Re: Orchestra GOLD ✱ T5 Festival 2027')
+
+        with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
+            MockGen.return_value.generate.return_value = _mock_draft()
+            with patch('app.pitch_machine.cli._generate_followup_body',
+                       return_value=mock_followup):
+                resp = client.post(
+                    '/projects/orchestra-gold/pitch-machine/run-generate-next',
+                    content_type='application/json',
+                )
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert 'error' not in data, f"run_generate_next returned error: {data.get('error')}"
+
+        with app.app_context():
+            rows = PitchApproval.query.order_by(PitchApproval.touch_number).all()
+            assert len(rows) == 3, (
+                f"Expected 3 PitchApproval rows (Touch 1/2/3), got {len(rows)}. "
+                "run_generate_next did not create follow-up rows even though "
+                "touch1_to_touch2_days and touch2_to_touch3_days are configured."
+            )
+            assert [r.touch_number for r in rows] == [1, 2, 3]
+            assert all(r.status == 'pending' for r in rows)
+
+    def test_one_row_created_when_no_sequence_configured(self, app, db, client):
+        """T6: pitch type with no intervals → only Touch 1 is created."""
+        from app.models.pitch import PitchApproval
+        from app.models.pitch_config import PitchTypeConfig
+        from unittest.mock import patch
+
+        with app.app_context():
+            if PitchTypeConfig.query.filter_by(name='WAA').first() is None:
+                db.session.add(PitchTypeConfig(
+                    name='WAA',
+                    archive_dropbox_path='/waa.docx',
+                    prompt_template='Draft {name} {website} {description}',
+                    badge_color='#5a7aaa',
+                    active=True,
+                    touch1_to_touch2_days=None,
+                ))
+                db.session.commit()
+
+        _seed_generate_task(db, app, pitch_type='WAA', hubspot_id='hs-t6')
+
+        with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
+            MockGen.return_value.generate.return_value = _mock_draft()
+            client.post(
+                '/projects/orchestra-gold/pitch-machine/run-generate-next',
+                content_type='application/json',
+            )
+
+        with app.app_context():
+            rows = PitchApproval.query.all()
+            assert len(rows) == 1, (
+                f"Expected 1 PitchApproval row (Touch 1 only), got {len(rows)}. "
+                "Pitch types with no sequence config must not generate Touch 2/3."
+            )
+            assert rows[0].touch_number == 1
+
+
+# ── T5b: CLI path also creates 3 rows ─────────────────────────────────────────
+
+class TestT5bCLIPathCreatesThreeRows:
+    """T5b: generate-drafts CLI must also create 3 rows. Both entry points share
+    _process_generate_draft_task, so this is a regression guard against drift."""
+
+    def test_cli_creates_three_rows(self, app, db, runner):
+        from app.models.pitch import PitchApproval
+        from unittest.mock import patch
+
+        _seed_pitch_type_with_sequence(db, app)
+        _seed_generate_task(db, app)
+
+        mock_followup = ('<p>Follow-up body.</p>', 'Re: Orchestra GOLD ✱ T5 Festival 2027')
+
+        with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
+            MockGen.return_value.generate.return_value = _mock_draft()
+            with patch('app.pitch_machine.cli._generate_followup_body',
+                       return_value=mock_followup):
+                with patch('app.integrations.dropbox_sync.get_or_create_queue_csv',
+                           return_value=''):
+                    with patch('app.integrations.dropbox_sync.sync_knowledge_to_cache'):
+                        runner.invoke(app.cli, ['generate-drafts'])
+
+        with app.app_context():
+            rows = PitchApproval.query.order_by(PitchApproval.touch_number).all()
+            assert len(rows) == 3, (
+                f"Expected 3 PitchApproval rows from CLI path, got {len(rows)}."
+            )
+            assert [r.touch_number for r in rows] == [1, 2, 3]
+
+
+# ── T12: config_edit round-trips touch1_to_touch2_days ────────────────────────
+
+class TestT12ConfigEditInterval:
+    """T12: editing a pitch type via the form must persist touch1_to_touch2_days.
+    This test would have caught the gap where the DB had the column but the route
+    never read it from the form."""
+
+    CONFIG_URL = '/projects/orchestra-gold/pitch-machine/config'
+
+    def _create_pitch_type(self, db, app):
+        from app.models.pitch_config import PitchTypeConfig
+        with app.app_context():
+            pt = PitchTypeConfig(
+                name='T12 Type',
+                archive_dropbox_path='/t12.docx',
+                prompt_template='Draft {name} {website} {description}',
+                badge_color='#888888',
+                active=True,
+            )
+            db.session.add(pt)
+            db.session.commit()
+            return pt.id
+
+    def test_interval_persisted_after_edit(self, app, db, client):
+        from app.models.pitch_config import PitchTypeConfig
+
+        tid = self._create_pitch_type(db, app)
+
+        resp = client.post(
+            f'{self.CONFIG_URL}/{tid}/edit',
+            data={
+                'name':                  'T12 Type',
+                'archive_dropbox_path':  '/t12.docx',
+                'prompt_template':       'Draft {name} {website} {description}',
+                'badge_color':           '#888888',
+                'sort_order':            '0',
+                'is_cyclical':           '1',
+                'touch1_to_touch2_days': '21',
+                'touch2_to_touch3_days': '14',
+                'touch2_prompt':         'Write a brief follow-up.',
+                'touch3_prompt':         'Write a graceful close-out.',
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code in (302, 200), f"Unexpected status {resp.status_code}"
+
+        with app.app_context():
+            pt = PitchTypeConfig.query.get(tid)
+            assert pt.touch1_to_touch2_days == 21, (
+                f"touch1_to_touch2_days={pt.touch1_to_touch2_days!r}; expected 21. "
+                "The config_edit route did not save the interval from the form field."
+            )
+            assert pt.touch2_to_touch3_days == 14
+            assert pt.touch2_prompt == 'Write a brief follow-up.'
+            assert pt.touch3_prompt == 'Write a graceful close-out.'
+
+    def test_blank_interval_saves_as_null(self, app, db, client):
+        """Submitting an empty interval field must store NULL, not 0 or ''."""
+        from app.models.pitch_config import PitchTypeConfig
+
+        tid = self._create_pitch_type(db, app)
+
+        client.post(
+            f'{self.CONFIG_URL}/{tid}/edit',
+            data={
+                'name':                  'T12 Type',
+                'archive_dropbox_path':  '/t12.docx',
+                'prompt_template':       'Draft {name} {website} {description}',
+                'badge_color':           '#888888',
+                'sort_order':            '0',
+                'is_cyclical':           '1',
+                'touch1_to_touch2_days': '',
+                'touch2_to_touch3_days': '',
+                'touch2_prompt':         '',
+                'touch3_prompt':         '',
+            },
+        )
+
+        with app.app_context():
+            pt = PitchTypeConfig.query.get(tid)
+            assert pt.touch1_to_touch2_days is None, (
+                f"touch1_to_touch2_days={pt.touch1_to_touch2_days!r}; expected None. "
+                "A blank interval must not schedule any follow-up touches."
             )

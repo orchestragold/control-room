@@ -23,6 +23,29 @@ _OOO_PATTERNS = _re.compile(
     _re.IGNORECASE,
 )
 
+_EMAIL_RE = _re.compile(r'\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b')
+_CC = 'booking@orchestragold.com'
+
+
+def _parse_date(value: Optional[str]):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _first_email(*sources: Optional[str]) -> str:
+    for text in sources:
+        if not text:
+            continue
+        for m in _EMAIL_RE.finditer(text):
+            addr = m.group(0).lower()
+            if 'orchestragold.com' not in addr:
+                return addr
+    return ''
+
 
 # ── process_queue ─────────────────────────────────────────────────────────────
 
@@ -199,43 +222,12 @@ def _write_hubspot_on_send(approval: 'PitchApproval') -> None:
 def generate_drafts() -> None:
     """
     Process pending pitch_machine/generate_draft tasks.
-
-    For each task: generate Touch 1 using the pitch type's prompt_template.
-    If the pitch type has touch1_to_touch2_days configured, also generate
-    Touch 2 and Touch 3 using touch2_prompt and touch3_prompt. All three
-    rows are created as status='pending'; Touch 2/3 send dates are computed
-    when Erich approves Touch 1.
-
+    Creates Touch 1/2/3 per target via _process_generate_draft_task.
     Cron fallback for browser-driven generation.
     """
-    from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
-    from app.models.pitch import PitchApproval
-    from app.models.pitch_config import PitchTypeConfig
+    from app.integrations.claude_drafts import DraftGenerationError
     from app.models.queue import APITaskQueue
-    from app.utils.sanitize import sanitize_body_html
 
-    _CC = 'booking@orchestragold.com'
-
-    def _parse_date(value):
-        if not value:
-            return None
-        try:
-            return datetime.strptime(value, '%Y-%m-%d').date()
-        except ValueError:
-            return None
-
-    def _first_email(*sources):
-        pat = _re.compile(r'\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b')
-        for text in sources:
-            if not text:
-                continue
-            for m in pat.finditer(text):
-                addr = m.group(0).lower()
-                if 'orchestragold.com' not in addr:
-                    return addr
-        return ''
-
-    # Reset tasks stuck in 'processing' for > 10 min
     stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
     stale = (
         APITaskQueue.query
@@ -271,116 +263,15 @@ def generate_drafts() -> None:
         task.started_at = datetime.utcnow()
         db.session.commit()
 
-        payload    = task.payload or {}
-        entry_type = payload.get('entry_type', 'hubspot')
-        pitch_type = payload.get('pitch_type', 'Festival')
-
-        if entry_type == 'hubspot':
-            name          = payload.get('name', '')
-            website       = payload.get('website') or None
-            description   = payload.get('description') or None
-            hubspot_id    = payload.get('hubspot_id', '')
-            email_address = ''
-        else:
-            name          = payload.get('item_name', '')
-            website       = None
-            description   = payload.get('notes') or None
-            hubspot_id    = payload.get('hubspot_id', '')
-            email_address = payload.get('email_address', '')
-
-        send_date = _parse_date(payload.get('send_date') or '')
-
         try:
-            draft = DraftGenerator(pitch_type=pitch_type).generate(
-                name=name, website=website, description=description,
-            )
+            result = _process_generate_draft_task(task)
+            succeeded += 1
+            suffix = {1: '', 2: ' (+T2)', 3: ' (+T2/T3)'}.get(result['touch_count'], '')
+            print(f"  Done: {result['name']}{suffix}")
         except DraftGenerationError as e:
-            task.status        = 'failed'
-            task.error_message = str(e)
-            task.completed_at  = datetime.utcnow()
-            db.session.commit()
             failed += 1
+            name = (task.payload or {}).get('name') or (task.payload or {}).get('item_name', '?')
             print(f'  Failed: {name}: {e}')
-            continue
-
-        if entry_type == 'hubspot':
-            to_email = _first_email(draft.research_notes)
-        else:
-            to_email = email_address
-
-        # Touch 1 — always created.
-        t1 = PitchApproval(
-            hubspot_contact_id = hubspot_id,
-            company_name       = name,
-            pitch_type         = pitch_type,
-            touch_number       = 1,
-            draft_subject      = draft.subject,
-            draft_body         = sanitize_body_html(draft.body),
-            research_notes     = draft.research_notes,
-            to_email           = to_email,
-            cc_email           = _CC,
-            send_date          = send_date,
-            status             = 'pending',
-        )
-        db.session.add(t1)
-
-        # Touch 2 and 3 — created if the pitch type has sequence config.
-        pt_config: Optional[PitchTypeConfig] = PitchTypeConfig.query.filter_by(
-            name=pitch_type
-        ).first()
-
-        if pt_config and pt_config.touch1_to_touch2_days is not None:
-            # Generate Touch 2 body using touch2_prompt (or a safe fallback).
-            t2_body, t2_subject = _generate_followup_body(
-                prompt_desc = pt_config.touch2_prompt or '',
-                touch_num   = 2,
-                name        = name,
-                t1_subject  = draft.subject,
-                pitch_type  = pitch_type,
-                description = description,
-            )
-            db.session.add(PitchApproval(
-                hubspot_contact_id = hubspot_id,
-                company_name       = name,
-                pitch_type         = pitch_type,
-                touch_number       = 2,
-                draft_subject      = t2_subject,
-                draft_body         = sanitize_body_html(t2_body),
-                research_notes     = draft.research_notes,
-                to_email           = to_email,
-                cc_email           = _CC,
-                status             = 'pending',
-                # send_date computed at Touch 1 approve time; null until then.
-            ))
-
-            if pt_config.touch2_to_touch3_days is not None:
-                t3_body, t3_subject = _generate_followup_body(
-                    prompt_desc = pt_config.touch3_prompt or '',
-                    touch_num   = 3,
-                    name        = name,
-                    t1_subject  = draft.subject,
-                    pitch_type  = pitch_type,
-                    description = description,
-                )
-                db.session.add(PitchApproval(
-                    hubspot_contact_id = hubspot_id,
-                    company_name       = name,
-                    pitch_type         = pitch_type,
-                    touch_number       = 3,
-                    draft_subject      = t3_subject,
-                    draft_body         = sanitize_body_html(t3_body),
-                    research_notes     = draft.research_notes,
-                    to_email           = to_email,
-                    cc_email           = _CC,
-                    status             = 'pending',
-                ))
-
-        task.status       = 'completed'
-        task.completed_at = datetime.utcnow()
-        db.session.commit()
-        succeeded += 1
-        touch_note = ' (+T2/T3)' if (pt_config and pt_config.touch1_to_touch2_days is not None) else ''
-        print(f'  Done: {name}{touch_note}')
 
     print(f'Finished: {succeeded} succeeded, {failed} failed.')
 
@@ -419,7 +310,7 @@ def _generate_followup_body(
     try:
         import anthropic
         from flask import current_app
-        client = anthropic.Anthropic(api_key=current_app.config['CLAUDE_API_KEY'])
+        client = anthropic.Anthropic(api_key=current_app.config['ANTHROPIC_API_KEY'])
         msg = client.messages.create(
             model='claude-sonnet-4-6',
             max_tokens=800,
@@ -434,6 +325,126 @@ def _generate_followup_body(
             f'Edit this before approving.]</p>'
         )
         return placeholder, subject
+
+
+# ── Shared generate-draft task processor ─────────────────────────────────────
+
+def _process_generate_draft_task(task) -> dict:
+    """
+    Process one generate_draft task. The task must already be in 'processing' state.
+
+    Creates Touch 1 always; creates Touch 2/3 when the pitch type has sequence
+    intervals configured. Commits on both success and failure.
+
+    Returns {'name': str, 'touch_count': int}.
+    Raises DraftGenerationError on generation failure (task marked 'failed' before raise).
+
+    Called by both run_generate_next (browser, one task at a time) and
+    generate_drafts (CLI, batch). Single implementation; two entry points.
+    """
+    from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
+    from app.models.pitch import PitchApproval
+    from app.models.pitch_config import PitchTypeConfig
+    from app.utils.sanitize import sanitize_body_html
+
+    payload    = task.payload or {}
+    entry_type = payload.get('entry_type', 'hubspot')
+    pitch_type = payload.get('pitch_type', 'Festival')
+
+    if entry_type == 'hubspot':
+        name          = payload.get('name', '')
+        website       = payload.get('website') or None
+        description   = payload.get('description') or None
+        hubspot_id    = payload.get('hubspot_id', '')
+        email_address = ''
+    else:
+        name          = payload.get('item_name', '')
+        website       = None
+        description   = payload.get('notes') or None
+        hubspot_id    = payload.get('hubspot_id', '')
+        email_address = payload.get('email_address', '')
+
+    send_date = _parse_date(payload.get('send_date') or '')
+
+    try:
+        draft = DraftGenerator(pitch_type=pitch_type).generate(
+            name=name, website=website, description=description,
+        )
+    except DraftGenerationError as exc:
+        task.status        = 'failed'
+        task.error_message = str(exc)
+        task.completed_at  = datetime.utcnow()
+        db.session.commit()
+        raise
+
+    to_email = _first_email(draft.research_notes) if entry_type == 'hubspot' else email_address
+
+    db.session.add(PitchApproval(
+        hubspot_contact_id = hubspot_id,
+        company_name       = name,
+        pitch_type         = pitch_type,
+        touch_number       = 1,
+        draft_subject      = draft.subject,
+        draft_body         = sanitize_body_html(draft.body),
+        research_notes     = draft.research_notes,
+        to_email           = to_email,
+        cc_email           = _CC,
+        send_date          = send_date,
+        status             = 'pending',
+    ))
+
+    touch_count = 1
+    pt_config: Optional[PitchTypeConfig] = PitchTypeConfig.query.filter_by(name=pitch_type).first()
+    if pt_config and pt_config.touch1_to_touch2_days is not None:
+        t2_body, t2_subject = _generate_followup_body(
+            prompt_desc = pt_config.touch2_prompt or '',
+            touch_num   = 2,
+            name        = name,
+            t1_subject  = draft.subject,
+            pitch_type  = pitch_type,
+            description = description,
+        )
+        db.session.add(PitchApproval(
+            hubspot_contact_id = hubspot_id,
+            company_name       = name,
+            pitch_type         = pitch_type,
+            touch_number       = 2,
+            draft_subject      = t2_subject,
+            draft_body         = sanitize_body_html(t2_body),
+            research_notes     = draft.research_notes,
+            to_email           = to_email,
+            cc_email           = _CC,
+            status             = 'pending',
+        ))
+        touch_count = 2
+
+        if pt_config.touch2_to_touch3_days is not None:
+            t3_body, t3_subject = _generate_followup_body(
+                prompt_desc = pt_config.touch3_prompt or '',
+                touch_num   = 3,
+                name        = name,
+                t1_subject  = draft.subject,
+                pitch_type  = pitch_type,
+                description = description,
+            )
+            db.session.add(PitchApproval(
+                hubspot_contact_id = hubspot_id,
+                company_name       = name,
+                pitch_type         = pitch_type,
+                touch_number       = 3,
+                draft_subject      = t3_subject,
+                draft_body         = sanitize_body_html(t3_body),
+                research_notes     = draft.research_notes,
+                to_email           = to_email,
+                cc_email           = _CC,
+                status             = 'pending',
+            ))
+            touch_count = 3
+
+    task.status       = 'completed'
+    task.completed_at = datetime.utcnow()
+    db.session.commit()
+    return {'name': name, 'touch_count': touch_count}
 
 
 # ── cancel_replied_touches ────────────────────────────────────────────────────

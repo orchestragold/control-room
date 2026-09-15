@@ -532,7 +532,8 @@ def generate():
 def run_generate_next():
     _require_access()
     from datetime import datetime, timedelta
-    from app.integrations.claude_drafts import DraftGenerationError, DraftGenerator
+    from app.integrations.claude_drafts import DraftGenerationError
+    from app.pitch_machine.cli import _process_generate_draft_task
 
     # Reset tasks stuck in 'processing' for > 5 min (gateway timeout recovery)
     stale_cutoff = datetime.utcnow() - timedelta(minutes=5)
@@ -563,59 +564,15 @@ def run_generate_next():
     task.started_at = datetime.utcnow()
     db.session.commit()
 
-    payload    = task.payload or {}
-    entry_type = payload.get('entry_type', 'hubspot')
-    pitch_type = payload.get('pitch_type', 'Festival')
-
-    if entry_type == 'hubspot':
-        name        = payload.get('name', '')
-        website     = payload.get('website') or None
-        description = payload.get('description') or None
-        hubspot_id  = payload.get('hubspot_id', '')
-        send_date   = _parse_form_date(payload.get('send_date') or '')
-    else:
-        name        = payload.get('item_name', '')
-        website     = None
-        description = payload.get('notes') or None
-        hubspot_id  = payload.get('hubspot_id', '')
-        send_date   = _parse_form_date(payload.get('send_date') or '')
-
     try:
-        draft = DraftGenerator(pitch_type=pitch_type).generate(
-            name=name, website=website, description=description,
-        )
+        result = _process_generate_draft_task(task)
     except DraftGenerationError as e:
-        task.status        = 'failed'
-        task.error_message = str(e)
-        task.completed_at  = datetime.utcnow()
-        db.session.commit()
         remaining = _pending_gen_count()
+        name = (task.payload or {}).get('name') or (task.payload or {}).get('item_name', '')
         return jsonify({'done': remaining == 0, 'remaining': remaining, 'error': f'{name}: {e}'})
 
-    if entry_type == 'hubspot':
-        to_email = _extract_email(draft.research_notes)
-    else:
-        to_email = payload.get('email_address', '')
-
-    db.session.add(PitchApproval(
-        hubspot_contact_id = hubspot_id,
-        company_name       = name,
-        pitch_type         = pitch_type,
-        touch_number       = 1,
-        draft_subject      = draft.subject,
-        draft_body         = sanitize_body_html(draft.body),
-        research_notes     = draft.research_notes,
-        to_email           = to_email,
-        cc_email           = _DEFAULT_CC,
-        send_date          = send_date,
-        status             = 'pending',
-    ))
-    task.status       = 'completed'
-    task.completed_at = datetime.utcnow()
-    db.session.commit()
-
     remaining = _pending_gen_count()
-    return jsonify({'done': remaining == 0, 'remaining': remaining, 'name': name})
+    return jsonify({'done': remaining == 0, 'remaining': remaining, 'name': result['name']})
 
 
 # ── Touch 1 review / approve ──────────────────────────────────────────────────────
@@ -1158,12 +1115,16 @@ def config_new():
     from app.models.pitch_config import PitchTypeConfig
 
     if request.method == 'POST':
-        name                 = request.form.get('name', '').strip()
-        archive_dropbox_path = request.form.get('archive_dropbox_path', '').strip()
-        prompt_template      = request.form.get('prompt_template', '').strip()
-        badge_color          = request.form.get('badge_color', '#888888').strip()
-        sort_order           = int(request.form.get('sort_order', 0) or 0)
-        is_cyclical          = request.form.get('is_cyclical') == '1'
+        name                  = request.form.get('name', '').strip()
+        archive_dropbox_path  = request.form.get('archive_dropbox_path', '').strip()
+        prompt_template       = request.form.get('prompt_template', '').strip()
+        badge_color           = request.form.get('badge_color', '#888888').strip()
+        sort_order            = int(request.form.get('sort_order', 0) or 0)
+        is_cyclical           = request.form.get('is_cyclical') == '1'
+        touch1_to_touch2_days = _parse_interval(request.form.get('touch1_to_touch2_days', ''))
+        touch2_to_touch3_days = _parse_interval(request.form.get('touch2_to_touch3_days', ''))
+        touch2_prompt         = request.form.get('touch2_prompt', '').strip() or None
+        touch3_prompt         = request.form.get('touch3_prompt', '').strip() or None
 
         error = _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color)
         if error:
@@ -1184,6 +1145,10 @@ def config_new():
             sort_order=sort_order,
             is_cyclical=is_cyclical,
             active=True,
+            touch1_to_touch2_days=touch1_to_touch2_days,
+            touch2_to_touch3_days=touch2_to_touch3_days,
+            touch2_prompt=touch2_prompt,
+            touch3_prompt=touch3_prompt,
         ))
         db.session.commit()
         flash(f'Pitch type {name!r} created.', 'success')
@@ -1201,12 +1166,16 @@ def config_edit(tid: int):
     pt = PitchTypeConfig.query.get_or_404(tid)
 
     if request.method == 'POST':
-        name                 = request.form.get('name', '').strip()
-        archive_dropbox_path = request.form.get('archive_dropbox_path', '').strip()
-        prompt_template      = request.form.get('prompt_template', '').strip()
-        badge_color          = request.form.get('badge_color', '#888888').strip()
-        sort_order           = int(request.form.get('sort_order', 0) or 0)
-        is_cyclical          = request.form.get('is_cyclical') == '1'
+        name                  = request.form.get('name', '').strip()
+        archive_dropbox_path  = request.form.get('archive_dropbox_path', '').strip()
+        prompt_template       = request.form.get('prompt_template', '').strip()
+        badge_color           = request.form.get('badge_color', '#888888').strip()
+        sort_order            = int(request.form.get('sort_order', 0) or 0)
+        is_cyclical           = request.form.get('is_cyclical') == '1'
+        touch1_to_touch2_days = _parse_interval(request.form.get('touch1_to_touch2_days', ''))
+        touch2_to_touch3_days = _parse_interval(request.form.get('touch2_to_touch3_days', ''))
+        touch2_prompt         = request.form.get('touch2_prompt', '').strip() or None
+        touch3_prompt         = request.form.get('touch3_prompt', '').strip() or None
 
         error = _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge_color)
         if error:
@@ -1223,24 +1192,32 @@ def config_edit(tid: int):
             return render_template('pitch_machine/config_form.html',
                                    mode='edit', pt=pt, form=request.form)
 
-        pt.name                 = name
-        pt.archive_dropbox_path = archive_dropbox_path
-        pt.prompt_template      = prompt_template
-        pt.badge_color          = badge_color
-        pt.sort_order           = sort_order
-        pt.is_cyclical          = is_cyclical
+        pt.name                  = name
+        pt.archive_dropbox_path  = archive_dropbox_path
+        pt.prompt_template       = prompt_template
+        pt.badge_color           = badge_color
+        pt.sort_order            = sort_order
+        pt.is_cyclical           = is_cyclical
+        pt.touch1_to_touch2_days = touch1_to_touch2_days
+        pt.touch2_to_touch3_days = touch2_to_touch3_days
+        pt.touch2_prompt         = touch2_prompt
+        pt.touch3_prompt         = touch3_prompt
         db.session.commit()
         flash(f'Pitch type {name!r} updated.', 'success')
         return redirect(url_for('pitch_machine.config_list'))
 
     return render_template('pitch_machine/config_form.html',
                            mode='edit', pt=pt, form={
-                               'name':                 pt.name,
-                               'archive_dropbox_path': pt.archive_dropbox_path,
-                               'prompt_template':      pt.prompt_template,
-                               'badge_color':          pt.badge_color,
-                               'sort_order':           pt.sort_order,
-                               'is_cyclical':          '1' if pt.is_cyclical else '0',
+                               'name':                  pt.name,
+                               'archive_dropbox_path':  pt.archive_dropbox_path,
+                               'prompt_template':       pt.prompt_template,
+                               'badge_color':           pt.badge_color,
+                               'sort_order':            pt.sort_order,
+                               'is_cyclical':           '1' if pt.is_cyclical else '0',
+                               'touch1_to_touch2_days': pt.touch1_to_touch2_days or '',
+                               'touch2_to_touch3_days': pt.touch2_to_touch3_days or '',
+                               'touch2_prompt':         pt.touch2_prompt or '',
+                               'touch3_prompt':         pt.touch3_prompt or '',
                            })
 
 
@@ -1275,6 +1252,15 @@ def _validate_pitch_type_form(name, archive_dropbox_path, prompt_template, badge
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────────
+
+def _parse_interval(value: str) -> Optional[int]:
+    """Parse a form integer field; returns None if blank or non-positive."""
+    try:
+        v = int(value)
+        return v if v > 0 else None
+    except (ValueError, TypeError):
+        return None
+
 
 def _get_type_colors() -> dict:
     """Return {name: badge_color} for all pitch types. Empty dict if DB unavailable."""

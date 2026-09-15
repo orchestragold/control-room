@@ -44,6 +44,30 @@
     width: 44px; height: 32px; padding: 2px; border: 1px solid #2a2a2a;
     border-radius: 2px; background: #0d0d0d; cursor: pointer;
   }
+
+  .touch-divider {
+    display: flex; align-items: center; gap: 14px; margin: 24px 0 20px;
+  }
+  .touch-divider-line { flex: 1; height: 1px; background: #222; }
+  .touch-divider-label {
+    font-size: 11px; color: #555; letter-spacing: 0.08em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .touch-divider-interval {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .touch-divider-interval input[type="number"] {
+    width: 64px; padding: 4px 8px; background: #0d0d0d;
+    border: 1px solid #2a2a2a; border-radius: 2px; color: #ddd;
+    font-size: 12px; font-family: inherit;
+  }
+  .touch-divider-interval input:focus { outline: 1px solid #3a5a3a; border-color: #3a5a3a; }
+  .touch-divider-interval span { font-size: 11px; color: #555; }
+  .touch-section-label {
+    font-size: 11px; color: #555; letter-spacing: 0.05em; text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .field textarea.touch-prompt { min-height: 160px; }
   .color-preview {
     font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
     text-transform: uppercase; padding: 3px 9px; border-radius: 2px;
@@ -157,12 +181,59 @@
     </div>
 
     <div class="field">
-      <label for="prompt_template">Prompt template</label>
+      <label for="prompt_template">Touch 1 — prompt template</label>
       <textarea id="prompt_template" name="prompt_template"
                 placeholder="Draft a Touch 1 ... pitch for the following target.&#10;&#10;Target: {name}&#10;Website: {website}&#10;Notes: {description}&#10;&#10;...">{{ form.get('prompt_template', '') }}</textarea>
       <div class="field-hint">
         Must contain <code>{name}</code>, <code>{website}</code>, and <code>{description}</code>.
         These are substituted at generation time. No other curly-brace placeholders allowed.
+      </div>
+    </div>
+
+    {# ── Touch 2 ──────────────────────────────────────────────────────────── #}
+    <div class="touch-divider">
+      <div class="touch-divider-line"></div>
+      <div class="touch-divider-interval">
+        <div class="touch-divider-label">Touch 1 → Touch 2</div>
+        <input type="number" name="touch1_to_touch2_days" id="touch1_to_touch2_days"
+               min="1" max="365"
+               value="{{ form.get('touch1_to_touch2_days', '') }}"
+               placeholder="days">
+        <span>days</span>
+      </div>
+      <div class="touch-divider-line"></div>
+    </div>
+
+    <div class="field">
+      <label for="touch2_prompt">Touch 2 — follow-up prompt</label>
+      <textarea id="touch2_prompt" name="touch2_prompt" class="touch-prompt"
+                placeholder="Write a brief Touch 2 follow-up for {name}. Reference the prior outreach without repeating the full pitch. Keep it to one short paragraph. End with the 👍🏽 emoji.">{{ form.get('touch2_prompt', '') }}</textarea>
+      <div class="field-hint">
+        Describes HOW to write the follow-up, not the body itself. Leave blank to use a generic fallback.
+        If the interval above is empty, Touch 2 will not be scheduled.
+      </div>
+    </div>
+
+    {# ── Touch 3 ──────────────────────────────────────────────────────────── #}
+    <div class="touch-divider">
+      <div class="touch-divider-line"></div>
+      <div class="touch-divider-interval">
+        <div class="touch-divider-label">Touch 2 → Touch 3</div>
+        <input type="number" name="touch2_to_touch3_days" id="touch2_to_touch3_days"
+               min="1" max="365"
+               value="{{ form.get('touch2_to_touch3_days', '') }}"
+               placeholder="days">
+        <span>days</span>
+      </div>
+      <div class="touch-divider-line"></div>
+    </div>
+
+    <div class="field">
+      <label for="touch3_prompt">Touch 3 — close-out prompt</label>
+      <textarea id="touch3_prompt" name="touch3_prompt" class="touch-prompt"
+                placeholder="Write a graceful close-out for {name}. This is the final touch in the cold sequence. One short paragraph — acknowledge you've reached out twice; make it easy for them to respond or ignore.">{{ form.get('touch3_prompt', '') }}</textarea>
+      <div class="field-hint">
+        Leave blank to use a generic fallback. Ignored if Touch 2 interval is not set.
       </div>
     </div>
 
