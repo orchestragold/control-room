@@ -171,6 +171,18 @@ def process_queue() -> None:
 
         db.session.commit()
 
+        # Generate next touch at send time (Touch 2 when Touch 1 sends, Touch 3 when Touch 2 sends).
+        # Separate transaction so a generation failure never rolls back the send record.
+        if approval and task_type in ('send_pitch_touch1', 'send_pitch_touch2'):
+            _next = 2 if task_type == 'send_pitch_touch1' else 3
+            try:
+                _generate_and_schedule_followup(approval, next_touch_num=_next)
+                db.session.commit()
+            except Exception as _gen_e:
+                db.session.rollback()
+                _cname = (approval.company_name or '?') if approval else '?'
+                print(f'  Warning: Touch {_next} generation failed for {_cname}: {_gen_e}')
+
     print(f'Done — {sent} sent, {failed} failed.')
 
 
@@ -195,6 +207,156 @@ def _reclassify_to_pitched_before(approval: 'PitchApproval') -> None:
             pt.pitch_type = 'Festival - Pitched Before'
     except Exception as exc:
         print(f'  Warning: pitch_targets reclassify failed for {approval.company_name}: {exc}')
+
+
+_PUBLISHED_PROCESS_RE = _re.compile(r'\bpublished[- ]process\b', _re.IGNORECASE)
+
+
+def _is_published_process_branch(research_notes: str) -> bool:
+    """Return True when the Touch 2 brief shows the published-process branch fired.
+    These drafts assert a specific factual claim about the recipient's booking process
+    and need human review. Err toward holding: false positive delays by one approval;
+    false negative sends an embarrassing wrong claim autonomously."""
+    return bool(_PUBLISHED_PROCESS_RE.search(research_notes or ''))
+
+
+def _generate_and_schedule_followup(
+    prev_approval: 'PitchApproval',
+    next_touch_num: int,
+) -> None:
+    """
+    Called from process_queue after a touch sends. Generates the next touch inline.
+
+    prev_approval — the approval that just sent (Touch 1 when generating Touch 2, etc.)
+    next_touch_num — 2 or 3
+
+    Standard branch: creates PitchApproval as 'approved' and schedules the send task.
+    Published-process branch: creates as 'pending' for human review (no task yet).
+    No-op when the pitch type has no interval configured, or a row already exists.
+
+    Adds objects to the session but does NOT commit — caller commits.
+    Raises on unexpected errors; caller should catch and rollback.
+    """
+    from app.models.pitch import PitchApproval
+    from app.models.pitch_config import PitchTypeConfig
+    from app.models.queue import APITaskQueue
+    from app.utils.dates import local_today as _local_today
+    from app.utils.sanitize import sanitize_body_html
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    import datetime as _dt
+
+    pt_config = PitchTypeConfig.query.filter_by(name=prev_approval.pitch_type).first()
+    if not pt_config:
+        return
+
+    if next_touch_num == 2:
+        days_offset = pt_config.touch1_to_touch2_days
+        prompt_desc = pt_config.touch2_prompt or ''
+        task_type   = 'send_pitch_touch2'
+    elif next_touch_num == 3:
+        days_offset = pt_config.touch2_to_touch3_days
+        prompt_desc = pt_config.touch3_prompt or ''
+        task_type   = 'send_pitch_touch3'
+    else:
+        return
+
+    if not days_offset:
+        return
+
+    # Guard against double-generation (e.g. cron retries).
+    existing = PitchApproval.query.filter(
+        PitchApproval.hubspot_contact_id == prev_approval.hubspot_contact_id,
+        PitchApproval.company_name       == prev_approval.company_name,
+        PitchApproval.pitch_type         == prev_approval.pitch_type,
+        PitchApproval.touch_number       == next_touch_num,
+        PitchApproval.status.in_(['pending', 'approved', 'sent']),
+    ).first()
+    if existing:
+        print(f'  Touch {next_touch_num} for {prev_approval.company_name} already exists — skipped.')
+        return
+
+    # Find Touch 1 for subject and threading context.
+    t1 = PitchApproval.query.filter_by(
+        hubspot_contact_id=prev_approval.hubspot_contact_id,
+        company_name=prev_approval.company_name,
+        touch_number=1,
+    ).first()
+    t1_subject = (t1.draft_subject if t1 else prev_approval.draft_subject) or ''
+
+    # Best-effort: description and website from HubSpot cache for hubspot-linked targets.
+    description: Optional[str] = None
+    website:     Optional[str] = None
+    if prev_approval.hubspot_contact_id:
+        try:
+            from app.models.hubspot_cache import HubSpotCompany
+            c = HubSpotCompany.query.filter_by(
+                hubspot_id=prev_approval.hubspot_contact_id
+            ).first()
+            if c:
+                description = c.description
+                website     = c.website
+        except Exception:
+            pass
+
+    body, subject, research_notes = _generate_followup_body(
+        prompt_desc = prompt_desc,
+        touch_num   = next_touch_num,
+        name        = prev_approval.company_name or '',
+        t1_subject  = t1_subject,
+        pitch_type  = prev_approval.pitch_type or '',
+        description = description,
+        website     = website,
+    )
+
+    needs_review = _is_published_process_branch(research_notes)
+    status       = 'pending' if needs_review else 'approved'
+
+    send_date = _local_today() + _dt.timedelta(days=days_offset)
+
+    new_approval = PitchApproval(
+        hubspot_contact_id = prev_approval.hubspot_contact_id,
+        company_name       = prev_approval.company_name,
+        pitch_type         = prev_approval.pitch_type,
+        touch_number       = next_touch_num,
+        draft_subject      = subject,
+        draft_body         = sanitize_body_html(body),
+        research_notes     = research_notes,
+        to_email           = prev_approval.to_email,
+        cc_email           = prev_approval.cc_email,
+        status             = status,
+        send_date          = send_date if status == 'approved' else None,
+        approved_at        = _dt.datetime.utcnow() if status == 'approved' else None,
+    )
+    db.session.add(new_approval)
+    db.session.flush()  # materialise id for task payload
+
+    if status == 'approved':
+        _pacific    = _ZoneInfo('America/Los_Angeles')
+        _local_send = _dt.datetime(
+            send_date.year, send_date.month, send_date.day, 9, 0, 0,
+            tzinfo=_pacific,
+        )
+        scheduled_at = _local_send.astimezone(_ZoneInfo('UTC')).replace(tzinfo=None)
+
+        db.session.add(APITaskQueue(
+            platform     = 'zoho_mail',
+            task_type    = task_type,
+            scheduled_at = scheduled_at,
+            payload      = {
+                'pitch_approval_id':  new_approval.id,
+                'touch1_approval_id': t1.id if t1 else None,
+                'to_email_intended':  prev_approval.to_email or '',
+                'to_email_actual':    prev_approval.to_email or '',
+                'cc_email':           prev_approval.cc_email or '',
+                'subject':            subject,
+                'body':               sanitize_body_html(body),
+                'was_redirected':     False,
+                'send_date':          send_date.isoformat(),
+            },
+        ))
+
+    flag = 'HOLD — published-process branch' if needs_review else 'auto-approved'
+    print(f'  Touch {next_touch_num} generated for {prev_approval.company_name} ({flag})')
 
 
 def _write_hubspot_on_send(approval: 'PitchApproval') -> None:
@@ -283,13 +445,22 @@ def _generate_followup_body(
     t1_subject: str,
     pitch_type: str,
     description: Optional[str],
-) -> tuple[str, str]:
+    website: Optional[str] = None,
+) -> tuple[str, str, str]:
     """
     Generate a follow-up email body using the Claude API.
-    Returns (body_html, subject). Subject is always 'Re: <t1_subject>'.
+    Returns (body_html, subject, research_notes).
+
+    prompt_desc is formatted with {name}/{website}/{description} placeholders before
+    sending — same substitution pattern as DraftGenerator.generate() uses for Touch 1.
+    Original subject is appended as context (not a placeholder in the template).
+
+    Subject falls back to 'Re: <t1_subject>' when the prompt produces no Subject line.
     Falls back to a minimal placeholder if generation fails.
     """
-    subject = f'Re: {t1_subject}' if t1_subject else f'Following up — {name}'
+    from app.integrations.claude_drafts import _parse_response
+
+    fallback_subject = f'Re: {t1_subject}' if t1_subject else f'Following up — {name}'
 
     if not prompt_desc:
         prompt_desc = (
@@ -298,13 +469,20 @@ def _generate_followup_body(
             f'Reference the prior outreach; do not repeat the full pitch.'
         )
 
+    # Substitute {name}/{website}/{description} placeholders (same contract as Touch 1
+    # prompt_template). Graceful fallback for prompts that don't use placeholders.
+    try:
+        formatted_desc = prompt_desc.format(
+            name        = name,
+            website     = website     or 'Not available',
+            description = description or 'Not available',
+        )
+    except (KeyError, ValueError):
+        formatted_desc = prompt_desc
+
     full_prompt = (
-        f'{prompt_desc}\n\n'
-        f'Target: {name}\n'
-        f'Notes: {description or "none"}\n'
-        f'Original subject: {t1_subject}\n\n'
-        f'Produce only the email body. No subject line, no headers. '
-        f'End with 👍🏽'
+        f'{formatted_desc}\n\n'
+        f'Original subject: {t1_subject}\n'
     )
 
     try:
@@ -316,15 +494,16 @@ def _generate_followup_body(
             max_tokens=800,
             messages=[{'role': 'user', 'content': full_prompt}],
         )
-        body = msg.content[0].text.strip()
-        return body, subject
+        raw = msg.content[0].text.strip()
+        research_notes, parsed_subject, body = _parse_response(raw)
+        subject = parsed_subject or fallback_subject
+        return body, subject, research_notes
     except Exception as e:
-        # Placeholder body — visible in review screen; Erich can edit before approving.
         placeholder = (
             f'<p>[Touch {touch_num} draft generation failed: {e}. '
             f'Edit this before approving.]</p>'
         )
-        return placeholder, subject
+        return placeholder, fallback_subject, ''
 
 
 # ── Shared generate-draft task processor ─────────────────────────────────────
@@ -393,58 +572,10 @@ def _process_generate_draft_task(task) -> dict:
         status             = 'pending',
     ))
 
-    touch_count = 1
-    pt_config: Optional[PitchTypeConfig] = PitchTypeConfig.query.filter_by(name=pitch_type).first()
-    if pt_config and pt_config.touch1_to_touch2_days is not None:
-        t2_body, t2_subject = _generate_followup_body(
-            prompt_desc = pt_config.touch2_prompt or '',
-            touch_num   = 2,
-            name        = name,
-            t1_subject  = draft.subject,
-            pitch_type  = pitch_type,
-            description = description,
-        )
-        db.session.add(PitchApproval(
-            hubspot_contact_id = hubspot_id,
-            company_name       = name,
-            pitch_type         = pitch_type,
-            touch_number       = 2,
-            draft_subject      = t2_subject,
-            draft_body         = sanitize_body_html(t2_body),
-            research_notes     = draft.research_notes,
-            to_email           = to_email,
-            cc_email           = _CC,
-            status             = 'pending',
-        ))
-        touch_count = 2
-
-        if pt_config.touch2_to_touch3_days is not None:
-            t3_body, t3_subject = _generate_followup_body(
-                prompt_desc = pt_config.touch3_prompt or '',
-                touch_num   = 3,
-                name        = name,
-                t1_subject  = draft.subject,
-                pitch_type  = pitch_type,
-                description = description,
-            )
-            db.session.add(PitchApproval(
-                hubspot_contact_id = hubspot_id,
-                company_name       = name,
-                pitch_type         = pitch_type,
-                touch_number       = 3,
-                draft_subject      = t3_subject,
-                draft_body         = sanitize_body_html(t3_body),
-                research_notes     = draft.research_notes,
-                to_email           = to_email,
-                cc_email           = _CC,
-                status             = 'pending',
-            ))
-            touch_count = 3
-
     task.status       = 'completed'
     task.completed_at = datetime.utcnow()
     db.session.commit()
-    return {'name': name, 'touch_count': touch_count}
+    return {'name': name, 'touch_count': 1}
 
 
 # ── cancel_replied_touches ────────────────────────────────────────────────────

@@ -171,107 +171,98 @@ class TestT2ThreadingHeaders:
         assert call_kwargs.get('in_reply_to') is None
 
 
-# ── T3: _schedule_followup_touches computes dates correctly ────────────────────
+# ── T3: generate-at-send-time — Touch 2 is created when Touch 1 sends ─────────
+#
+# Previously T3 tested _schedule_followup_touches (pre-scheduled at approval time).
+# Architecture changed 2026-09-15: Touch 2/3 are generated inline by process_queue
+# the moment their predecessor sends. _schedule_followup_touches is removed.
+# T11 (scheduled_at agreement) is folded into this class.
 
-class TestT3ScheduleFollowupTouches:
-    def _make_pitch_type_config(self, db, app, name='Festival - Cold',
-                                t1_to_t2=30, t2_to_t3=30,
-                                t2_prompt='write t2', t3_prompt='write t3'):
-        from app.models.pitch_config import PitchTypeConfig
-        with app.app_context():
-            if PitchTypeConfig.query.filter_by(name=name).first() is None:
-                db.session.add(PitchTypeConfig(
-                    name=name,
-                    archive_dropbox_path='/2026 pitches.docx',
-                    prompt_template='Draft {name} {website} {description}',
-                    badge_color='#5aaa7a',
-                    touch1_to_touch2_days=t1_to_t2,
-                    touch2_to_touch3_days=t2_to_t3,
-                    touch2_prompt=t2_prompt,
-                    touch3_prompt=t3_prompt,
-                ))
-                db.session.commit()
+def _seed_sequence_config(db, app, name='Festival - Cold', t1_to_t2=30, t2_to_t3=30):
+    from app.models.pitch_config import PitchTypeConfig
+    with app.app_context():
+        if PitchTypeConfig.query.filter_by(name=name).first() is None:
+            db.session.add(PitchTypeConfig(
+                name=name,
+                archive_dropbox_path='/2026 pitches.docx',
+                prompt_template='Draft {name} {website} {description}',
+                badge_color='#5aaa7a',
+                touch1_to_touch2_days=t1_to_t2,
+                touch2_to_touch3_days=t2_to_t3,
+                touch2_prompt='write t2',
+                touch3_prompt='write t3',
+            ))
+            db.session.commit()
 
-    def test_touch2_send_date_is_anchor_plus_t1_to_t2(self, app, db, client):
-        """Touch 2 send_date = approval anchor + touch1_to_touch2_days."""
-        self._make_pitch_type_config(db, app, t1_to_t2=30, t2_to_t3=30)
+
+_MOCK_FOLLOWUP_STANDARD = ('<p>Follow-up body.</p>', 'Re: Test', '')
+_MOCK_FOLLOWUP_PUBPROCESS = (
+    '<p>I see you publish at fest.com/apply</p>',
+    'Re: Test',
+    'Version: published-process — festival publishes an online application',
+)
+
+
+class TestT3GenerateAtSendTime:
+    """T3: Touch 2 is generated inline when Touch 1 sends.
+    T11 (scheduled_at agreement) is also covered here."""
+
+    def test_touch2_created_after_touch1_sends(self, app, db, runner):
+        """process_queue creates a Touch 2 row (approved + scheduled) when Touch 1 sends."""
+        _seed_sequence_config(db, app, t1_to_t2=30)
+
+        touch1_id = _make_approval(db, app, touch_number=1, status='approved')
+        _make_task(db, app, touch1_id, task_type='send_pitch_touch1')
+
+        with patch('app.integrations.zoho_mail.send_email',
+                   return_value={'data': {'messageId': '1'}}):
+            with patch('app.integrations.zoho_mail.get_message_rfc_id', return_value=None):
+                with patch('app.pitch_machine.cli._generate_followup_body',
+                           return_value=_MOCK_FOLLOWUP_STANDARD):
+                    runner.invoke(app.cli, ['process-queue'])
 
         with app.app_context():
             from app.models.pitch import PitchApproval
-            from app.models.queue import APITaskQueue
-            from app.models.user import User
-            from app.pitch_machine.routes import _schedule_followup_touches
             from app.utils.dates import local_today
-
-            # Create Touch 1 (already approved) and Touch 2 (pending).
-            t1 = PitchApproval(
-                hubspot_contact_id='hs-t3-001', company_name='T3 Festival',
-                pitch_type='Festival - Cold', touch_number=1,
-                draft_subject='Subj', draft_body='<p>B</p>',
-                to_email='t3@fest.com', cc_email='', status='approved',
+            rows = PitchApproval.query.filter(PitchApproval.touch_number > 1).all()
+            assert len(rows) == 1, (
+                f"Expected 1 Touch 2 row after Touch 1 sends, got {len(rows)}."
             )
-            t2 = PitchApproval(
-                hubspot_contact_id='hs-t3-001', company_name='T3 Festival',
-                pitch_type='Festival - Cold', touch_number=2,
-                draft_subject='Re: Subj', draft_body='<p>T2</p>',
-                to_email='t3@fest.com', cc_email='', status='pending',
+            t2 = rows[0]
+            assert t2.touch_number == 2
+            assert t2.status == 'approved', (
+                f"Touch 2 status={t2.status!r}; standard branch should be auto-approved."
             )
-            db.session.add_all([t1, t2])
-            db.session.commit()
-
-            today = local_today()
-            _schedule_followup_touches(t1, user_id=1)
-            db.session.commit()
-
-            t2_fresh = db.session.get(PitchApproval, t2.id)
-            expected_date = today + timedelta(days=30)
-            assert t2_fresh.send_date == expected_date, (
-                f"send_date={t2_fresh.send_date}; expected {expected_date} "
-                "(today + 30 days for Festival - Cold)."
+            expected_send = local_today() + timedelta(days=30)
+            assert t2.send_date == expected_send, (
+                f"Touch 2 send_date={t2.send_date}; expected today+30={expected_send}."
             )
-            assert t2_fresh.status == 'approved'
 
-    def test_scheduled_at_matches_send_date(self, app, db, client):
-        """The api_task_queue scheduled_at must match the Touch 2 send_date at 09:00 Pacific.
-        Two representations of the same moment must agree — this test enforces it."""
+    def test_scheduled_at_matches_send_date(self, app, db, runner):
+        """Touch 2 task.scheduled_at must equal 09:00 Pacific on send_date, in UTC.
+        Two representations of the same send moment must agree — T11."""
         from zoneinfo import ZoneInfo
-        self._make_pitch_type_config(db, app, t1_to_t2=14, t2_to_t3=14)
+        _seed_sequence_config(db, app, t1_to_t2=14)
+
+        touch1_id = _make_approval(db, app, touch_number=1, status='approved')
+        _make_task(db, app, touch1_id, task_type='send_pitch_touch1')
+
+        with patch('app.integrations.zoho_mail.send_email',
+                   return_value={'data': {'messageId': '1'}}):
+            with patch('app.integrations.zoho_mail.get_message_rfc_id', return_value=None):
+                with patch('app.pitch_machine.cli._generate_followup_body',
+                           return_value=_MOCK_FOLLOWUP_STANDARD):
+                    runner.invoke(app.cli, ['process-queue'])
 
         with app.app_context():
             from app.models.pitch import PitchApproval
             from app.models.queue import APITaskQueue
-            from app.pitch_machine.routes import _schedule_followup_touches
-            from app.utils.dates import local_today
+            t2 = PitchApproval.query.filter_by(touch_number=2).first()
+            assert t2 is not None, "Touch 2 row not created"
+            task = APITaskQueue.query.filter_by(task_type='send_pitch_touch2').first()
+            assert task is not None, "No send_pitch_touch2 task created"
 
-            t1 = PitchApproval(
-                hubspot_contact_id='hs-t3-002', company_name='Sched Festival',
-                pitch_type='Festival - Cold', touch_number=1,
-                draft_subject='S', draft_body='<p>X</p>',
-                to_email='s@fest.com', cc_email='', status='approved',
-            )
-            t2 = PitchApproval(
-                hubspot_contact_id='hs-t3-002', company_name='Sched Festival',
-                pitch_type='Festival - Cold', touch_number=2,
-                draft_subject='Re: S', draft_body='<p>Y</p>',
-                to_email='s@fest.com', cc_email='', status='pending',
-            )
-            db.session.add_all([t1, t2])
-            db.session.commit()
-
-            _schedule_followup_touches(t1, user_id=1)
-            db.session.commit()
-
-            t2_fresh = db.session.get(PitchApproval, t2.id)
-            task = APITaskQueue.query.filter_by(
-                platform='zoho_mail', task_type='send_pitch_touch2'
-            ).filter(
-                APITaskQueue.payload['pitch_approval_id'].as_integer() == t2.id
-            ).first()
-
-            assert task is not None, "No task row was created for Touch 2"
-
-            # The task's scheduled_at must be 09:00 Pacific on send_date, in UTC.
-            sd = t2_fresh.send_date
+            sd = t2.send_date
             expected_utc = datetime(sd.year, sd.month, sd.day, 9, 0, 0,
                                     tzinfo=ZoneInfo('America/Los_Angeles')
                                     ).astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
@@ -282,16 +273,75 @@ class TestT3ScheduleFollowupTouches:
                 "and scheduled_at must be 09:00 Pacific converted to UTC."
             )
 
+    def test_published_process_branch_creates_pending_row(self, app, db, runner):
+        """Published-process branch in Touch 2 notes → status='pending', no send task."""
+        _seed_sequence_config(db, app)
 
-# ── T4: no intervals → no Touch 2/3 scheduling ────────────────────────────────
+        touch1_id = _make_approval(db, app, touch_number=1, status='approved')
+        _make_task(db, app, touch1_id, task_type='send_pitch_touch1')
+
+        with patch('app.integrations.zoho_mail.send_email',
+                   return_value={'data': {'messageId': '1'}}):
+            with patch('app.integrations.zoho_mail.get_message_rfc_id', return_value=None):
+                with patch('app.pitch_machine.cli._generate_followup_body',
+                           return_value=_MOCK_FOLLOWUP_PUBPROCESS):
+                    runner.invoke(app.cli, ['process-queue'])
+
+        with app.app_context():
+            from app.models.pitch import PitchApproval
+            from app.models.queue import APITaskQueue
+            t2 = PitchApproval.query.filter_by(touch_number=2).first()
+            assert t2 is not None, "Touch 2 row not created"
+            assert t2.status == 'pending', (
+                f"Touch 2 status={t2.status!r}; published-process branch must hold for review."
+            )
+            task = APITaskQueue.query.filter_by(task_type='send_pitch_touch2').first()
+            assert task is None, (
+                "No send task should be queued for a pending Touch 2 (published-process branch)."
+            )
+
+    def test_touch2_research_notes_are_its_own_brief(self, app, db, runner):
+        """Defect 2 regression: Touch 2's research_notes must be its own parsed brief,
+        not a copy of Touch 1's brief."""
+        _seed_sequence_config(db, app)
+
+        touch1_id = _make_approval(db, app, touch_number=1, status='approved')
+        _make_task(db, app, touch1_id, task_type='send_pitch_touch1')
+
+        t2_notes = 'Talent buyer: Jane Smith (confirmed via website)'
+        mock_followup = ('<p>Touch 2 body.</p>', 'Re: Test', t2_notes)
+
+        with patch('app.integrations.zoho_mail.send_email',
+                   return_value={'data': {'messageId': '1'}}):
+            with patch('app.integrations.zoho_mail.get_message_rfc_id', return_value=None):
+                with patch('app.pitch_machine.cli._generate_followup_body',
+                           return_value=mock_followup):
+                    runner.invoke(app.cli, ['process-queue'])
+
+        with app.app_context():
+            from app.models.pitch import PitchApproval
+            t1 = db.session.get(PitchApproval, touch1_id)
+            t2 = PitchApproval.query.filter_by(touch_number=2).first()
+            assert t2 is not None
+            assert t2.research_notes == t2_notes, (
+                f"Touch 2 research_notes={t2.research_notes!r}; "
+                "must be Touch 2's own parsed brief, not Touch 1's."
+            )
+            # Touch 1's notes are separate
+            assert t2.research_notes != t1.research_notes or t1.research_notes == t2_notes, (
+                "Touch 1 and Touch 2 briefs must be independently stored."
+            )
+
+
+# ── T4: no interval → no Touch 2 generated ────────────────────────────────────
 
 class TestT4NoIntervals:
-    def test_no_followup_scheduled_when_interval_null(self, app, db):
-        """Pitch type with touch1_to_touch2_days=None must not schedule any followup."""
-        from app.models.pitch_config import PitchTypeConfig
+    def test_no_followup_when_interval_null(self, app, db):
+        """_generate_and_schedule_followup is a no-op when interval is None."""
         from app.models.pitch import PitchApproval
+        from app.models.pitch_config import PitchTypeConfig
         from app.models.queue import APITaskQueue
-        from app.pitch_machine.routes import _schedule_followup_touches
+        from app.pitch_machine.cli import _generate_and_schedule_followup
 
         with app.app_context():
             if PitchTypeConfig.query.filter_by(name='WAA').first() is None:
@@ -300,7 +350,7 @@ class TestT4NoIntervals:
                     archive_dropbox_path='/WAA pitches.docx',
                     prompt_template='Draft {name} {website} {description}',
                     badge_color='#5a7aaa',
-                    touch1_to_touch2_days=None,  # no sequence configured
+                    touch1_to_touch2_days=None,
                 ))
                 db.session.commit()
 
@@ -308,24 +358,18 @@ class TestT4NoIntervals:
                 hubspot_contact_id='', company_name='WAA Presenter',
                 pitch_type='WAA', touch_number=1,
                 draft_subject='S', draft_body='<p>X</p>',
-                to_email='p@waa.com', cc_email='', status='approved',
+                to_email='p@waa.com', cc_email='', status='sent',
             )
-            t2 = PitchApproval(
-                hubspot_contact_id='', company_name='WAA Presenter',
-                pitch_type='WAA', touch_number=2,
-                draft_subject='Re: S', draft_body='<p>Y</p>',
-                to_email='p@waa.com', cc_email='', status='pending',
-            )
-            db.session.add_all([t1, t2])
+            db.session.add(t1)
             db.session.commit()
-            initial_task_count = APITaskQueue.query.count()
+            initial_approval_count = PitchApproval.query.count()
+            initial_task_count     = APITaskQueue.query.count()
 
-            _schedule_followup_touches(t1, user_id=1)
+            _generate_and_schedule_followup(t1, next_touch_num=2)
             db.session.commit()
 
-            t2_fresh = db.session.get(PitchApproval, t2.id)
-            assert t2_fresh.status == 'pending', (
-                "Touch 2 should stay 'pending' when the pitch type has no interval configured."
+            assert PitchApproval.query.count() == initial_approval_count, (
+                "No PitchApproval should be created when touch1_to_touch2_days is None."
             )
             assert APITaskQueue.query.count() == initial_task_count, (
                 "No task should be created when touch1_to_touch2_days is None."
@@ -528,47 +572,41 @@ def _mock_draft():
     return d
 
 
-class TestT5BrowserPathCreatesThreeRows:
-    """T5: run_generate_next must create 3 PitchApproval rows when the pitch type
-    has touch1_to_touch2_days and touch2_to_touch3_days configured."""
+class TestT5BrowserPathCreatesOneRow:
+    """T5: run_generate_next creates exactly 1 PitchApproval (Touch 1) at generation
+    time, regardless of whether the pitch type has a sequence configured.
+    Touch 2/3 are generated at send time by process_queue."""
 
-    def test_three_rows_created_via_browser_path(self, app, db, client):
+    def test_one_row_created_via_browser_path(self, app, db, client):
         from app.models.pitch import PitchApproval
-        from unittest.mock import patch, MagicMock
 
         _seed_pitch_type_with_sequence(db, app)
         _seed_generate_task(db, app)
 
-        mock_followup = ('<p>Follow-up body.</p>', 'Re: Orchestra GOLD ✱ T5 Festival 2027')
-
         with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
             MockGen.return_value.generate.return_value = _mock_draft()
-            with patch('app.pitch_machine.cli._generate_followup_body',
-                       return_value=mock_followup):
-                resp = client.post(
-                    '/projects/orchestra-gold/pitch-machine/run-generate-next',
-                    content_type='application/json',
-                )
+            resp = client.post(
+                '/projects/orchestra-gold/pitch-machine/run-generate-next',
+                content_type='application/json',
+            )
 
         assert resp.status_code == 200
         data = resp.get_json()
         assert 'error' not in data, f"run_generate_next returned error: {data.get('error')}"
 
         with app.app_context():
-            rows = PitchApproval.query.order_by(PitchApproval.touch_number).all()
-            assert len(rows) == 3, (
-                f"Expected 3 PitchApproval rows (Touch 1/2/3), got {len(rows)}. "
-                "run_generate_next did not create follow-up rows even though "
-                "touch1_to_touch2_days and touch2_to_touch3_days are configured."
+            rows = PitchApproval.query.all()
+            assert len(rows) == 1, (
+                f"Expected 1 PitchApproval row (Touch 1 only at generation time), got {len(rows)}. "
+                "Touch 2/3 are generated at send time, not at generation time."
             )
-            assert [r.touch_number for r in rows] == [1, 2, 3]
-            assert all(r.status == 'pending' for r in rows)
+            assert rows[0].touch_number == 1
+            assert rows[0].status == 'pending'
 
-    def test_one_row_created_when_no_sequence_configured(self, app, db, client):
-        """T6: pitch type with no intervals → only Touch 1 is created."""
+    def test_one_row_when_no_sequence_configured(self, app, db, client):
+        """T6: pitch type with no intervals → still only Touch 1 created (unchanged)."""
         from app.models.pitch import PitchApproval
         from app.models.pitch_config import PitchTypeConfig
-        from unittest.mock import patch
 
         with app.app_context():
             if PitchTypeConfig.query.filter_by(name='WAA').first() is None:
@@ -593,43 +631,37 @@ class TestT5BrowserPathCreatesThreeRows:
 
         with app.app_context():
             rows = PitchApproval.query.all()
-            assert len(rows) == 1, (
-                f"Expected 1 PitchApproval row (Touch 1 only), got {len(rows)}. "
-                "Pitch types with no sequence config must not generate Touch 2/3."
-            )
+            assert len(rows) == 1
             assert rows[0].touch_number == 1
 
 
 # ── T5b: CLI path also creates 3 rows ─────────────────────────────────────────
 
-class TestT5bCLIPathCreatesThreeRows:
-    """T5b: generate-drafts CLI must also create 3 rows. Both entry points share
-    _process_generate_draft_task, so this is a regression guard against drift."""
+class TestT5bCLIPathCreatesOneRow:
+    """T5b: generate-drafts CLI also creates only Touch 1 at generation time.
+    Both run_generate_next and generate-drafts share _process_generate_draft_task —
+    this test is a regression guard that they stay in sync."""
 
-    def test_cli_creates_three_rows(self, app, db, runner):
+    def test_cli_creates_one_row(self, app, db, runner):
         from app.models.pitch import PitchApproval
-        from unittest.mock import patch
 
         _seed_pitch_type_with_sequence(db, app)
         _seed_generate_task(db, app)
 
-        mock_followup = ('<p>Follow-up body.</p>', 'Re: Orchestra GOLD ✱ T5 Festival 2027')
-
         with patch('app.integrations.claude_drafts.DraftGenerator') as MockGen:
             MockGen.return_value.generate.return_value = _mock_draft()
-            with patch('app.pitch_machine.cli._generate_followup_body',
-                       return_value=mock_followup):
-                with patch('app.integrations.dropbox_sync.get_or_create_queue_csv',
-                           return_value=''):
-                    with patch('app.integrations.dropbox_sync.sync_knowledge_to_cache'):
-                        runner.invoke(app.cli, ['generate-drafts'])
+            with patch('app.integrations.dropbox_sync.get_or_create_queue_csv',
+                       return_value=''):
+                with patch('app.integrations.dropbox_sync.sync_knowledge_to_cache'):
+                    runner.invoke(app.cli, ['generate-drafts'])
 
         with app.app_context():
             rows = PitchApproval.query.order_by(PitchApproval.touch_number).all()
-            assert len(rows) == 3, (
-                f"Expected 3 PitchApproval rows from CLI path, got {len(rows)}."
+            assert len(rows) == 1, (
+                f"Expected 1 PitchApproval row (Touch 1 only) from CLI path, got {len(rows)}. "
+                "Touch 2/3 are generated at send time by process_queue."
             )
-            assert [r.touch_number for r in rows] == [1, 2, 3]
+            assert rows[0].touch_number == 1
 
 
 # ── T12: config_edit round-trips touch1_to_touch2_days ────────────────────────
